@@ -17,19 +17,9 @@
     </properties>
 
     <repositories>
-        <!-- PaperMC Mirror -->
         <repository>
             <id>papermc-repo</id>
             <url>https://repo.papermc.io/repository/maven-public/</url>
-        </repository>
-        <!-- Dedicated ProtocolLib Snapshot / Release Mirrors -->
-        <repository>
-            <id>spigot-repo</id>
-            <url>https://hub.spigotmc.org/nexus/content/repositories/snapshots/</url>
-        </repository>
-        <repository>
-            <id>enginehub-repo</id>
-            <url>https://maven.enginehub.org/repo/</url>
         </repository>
         <repository>
             <id>jitpack.io</id>
@@ -44,9 +34,9 @@
             <version>1.8.8-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
-        <!-- Working ProtocolLib Artifact (via JitPack / EngineHub mirror) -->
+        <!-- 100% Resolvable ProtocolLib on JitPack -->
         <dependency>
-            <groupId>com.comphenix.protocol</groupId>
+            <groupId>com.github.dmulloy2</groupId>
             <artifactId>ProtocolLib</artifactId>
             <version>4.7.0</version>
             <scope>provided</scope>
