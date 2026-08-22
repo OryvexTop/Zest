@@ -1,75 +1,71 @@
 import os
 import subprocess
 import sys
+import getpass
 
-REPO_URL = "https://github.com/OryvexTop/Zest.git"
-BRANCH_NAME = "main"
-COMMIT_MESSAGE = "feat: implement ZestKnockback Spigot engine & CI workflow"
+def run(cmd, env=None):
+    """Run shell command with live stdout."""
+    res = subprocess.run(cmd, shell=True, text=True, capture_output=True, env=env)
+    if res.returncode != 0:
+        print(f"[!] Error: {res.stderr.strip()}")
+        return False, res.stderr.strip()
+    return True, res.stdout.strip()
 
-def run_cmd(cmd, allow_fail=False):
-    """Executes a shell command and streams output in real-time."""
-    print(f"[*] Executing: {' '.join(cmd) if isinstance(cmd, list) else cmd}")
-    result = subprocess.run(cmd, shell=isinstance(cmd, str), capture_output=True, text=True)
-    
-    if result.returncode != 0 and not allow_fail:
-        print(f"[!] Error executing command: {result.stderr.strip()}", file=sys.stderr)
-        sys.exit(result.returncode)
-    
-    return result.stdout.strip()
-
-def push_to_github():
+def main():
     print("=" * 60)
-    print(" GitHub Auto-Pusher for OryvexTop/Zest ")
+    print(" 🚀 One-Click GitHub Pusher (ZestKnockback)")
     print("=" * 60)
 
-    # 1. Check if git is installed
-    try:
-        run_cmd(["git", "--version"])
-    except FileNotFoundError:
-        print("[!] Git executable not found on system PATH. Please install Git.", file=sys.stderr)
-        sys.exit(1)
+    # 1. Ask for Target Username / Repo & Token (to bypass 403 / auth blocks)
+    default_user = "muvixo"
+    username = input(f"Enter your active GitHub username [{default_user}]: ").strip() or default_user
+    repo_name = input("Enter repository name [Zest]: ").strip() or "Zest"
+    
+    print("\n💡 Note: To push without popups, generate a GitHub Personal Access Token (PAT):")
+    print("   Go to: https://github.com/settings/tokens (classic) -> select 'repo' scope")
+    token = getpass.getpass("Enter your GitHub Personal Access Token (PAT): ").strip()
 
-    # 2. Initialize repo if not already a git repository
+    if not token:
+        remote_url = f"https://github.com/{username}/{repo_name}.git"
+    else:
+        # Embed token directly into the HTTPS clone URL for seamless authentication
+        remote_url = f"https://{username}:{token}@github.com/{username}/{repo_name}.git"
+
+    print("\n[*] Initializing and preparing files...")
+
+    # 2. Configure Git config if missing
+    run('git config user.name "Muvixo"')
+    run('git config user.email "contact@muvixo.dev"')
+
+    # 3. Init or refresh local git
     if not os.path.exists(".git"):
-        print("[*] Initializing new Git repository...")
-        run_cmd(["git", "init"])
+        run("git init")
+
+    run("git branch -M main")
+
+    # 4. Set Remote
+    run("git remote remove origin")
+    success, err = run(f'git remote add origin "{remote_url}"')
+
+    # 5. Add, Commit, Push
+    print("[*] Staging all project files & GitHub Action workflows...")
+    run("git add .")
+
+    print("[*] Committing...")
+    run('git commit -m "feat: complete ZestKnockback Spigot engine build pipeline"')
+
+    print(f"[*] Pushing code to {username}/{repo_name} (main branch)...")
+    success, out = run("git push -u origin main --force")
+
+    if success:
+        print("\n" + "=" * 60)
+        print(" [✔] PUSH SUCCESSFUL!")
+        print(f" 📦 Repo Link: https://github.com/{username}/{repo_name}")
+        print(f" ⚙️ GitHub Actions: https://github.com/{username}/{repo_name}/actions")
+        print("=" * 60)
+        print("Your .jar file is now building automatically on GitHub Actions.")
     else:
-        print("[+] Existing Git repository detected.")
-
-    # 3. Ensure a valid git branch name
-    run_cmd(["git", "branch", "-M", BRANCH_NAME])
-
-    # 4. Handle Remote Origin
-    remotes = run_cmd(["git", "remote"], allow_fail=True)
-    if "origin" in remotes.splitlines():
-        print(f"[*] Updating 'origin' remote to {REPO_URL}...")
-        run_cmd(["git", "remote", "set-url", "origin", REPO_URL])
-    else:
-        print(f"[*] Adding 'origin' remote -> {REPO_URL}...")
-        run_cmd(["git", "remote", "add", "origin", REPO_URL])
-
-    # 5. Stage files
-    print("[*] Staging project files...")
-    run_cmd(["git", "add", "."])
-
-    # 6. Commit changes (skip if working tree is clean)
-    status = run_cmd(["git", "status", "--porcelain"])
-    if status:
-        print(f"[*] Committing changes: '{COMMIT_MESSAGE}'...")
-        run_cmd(["git", "commit", "-m", COMMIT_MESSAGE])
-    else:
-        print("[+] Working directory clean. Nothing new to commit.")
-
-    # 7. Push to GitHub
-    print(f"[*] Pushing to origin/{BRANCH_NAME}...")
-    try:
-        push_output = run_cmd(["git", "push", "-u", "origin", BRANCH_NAME])
-        print(push_output)
-        print("\n[✔] Successfully pushed code to https://github.com/OryvexTop/Zest")
-        print("[*] GitHub Actions will now trigger and build your .jar artifact automatically.")
-    except Exception as e:
-        print(f"[!] Push failed: {e}")
-        print("\n[Hint] If GitHub asks for authentication, ensure you use a Personal Access Token (PAT) or have SSH keys configured.")
+        print("\n[!] Push failed. Make sure the repository exists under this account and the token is valid.")
 
 if __name__ == "__main__":
-    push_to_github()
+    main()
