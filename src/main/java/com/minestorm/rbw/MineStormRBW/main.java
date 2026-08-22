@@ -12,33 +12,20 @@ import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
-import java.util.Random;
 import java.util.UUID;
 
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.craftbukkit.v1_8_R3.entity.CraftPlayer;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.util.Vector;
 
 import com.comphenix.protocol.PacketType;
 import com.comphenix.protocol.ProtocolLibrary;
-import com.comphenix.protocol.ProtocolManager;
 import com.comphenix.protocol.events.ListenerPriority;
 import com.comphenix.protocol.events.PacketAdapter;
 import com.comphenix.protocol.events.PacketContainer;
 import com.comphenix.protocol.events.PacketEvent;
-
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelDuplexHandler;
-import io.netty.channel.ChannelHandlerContext;
-import net.minecraft.server.v1_8_R3.EntityPlayer;
 
 public class main extends JavaPlugin {
     public static Plugin thisplugin;
@@ -54,7 +41,7 @@ public class main extends JavaPlugin {
     public static String cpslimitdesc = "CPS limit (hypixel comobing won't work if the player is clicking beyond this value in a second): ";
     public static String thirdsprinthitdesc = "Third Sprint Hit (Enable sprint hit for the third combo hit): ";
     public static String delaymovedesc = "Movement Tick Delay (Delay every player's movement by this value): ";
-    public static String consistantkbdesc = "Consistant KB (Combo KB feels more consistant, hit trading might be weird): ";
+    public static String consistantkbdesc = "Consistant KB (Activate Zest Tap Engine): ";
     
     public static String folderPath = Paths.get("").toAbsolutePath().toString() + File.separator + "plugins" + File.separator + "MineStormRBW" + File.separator;
     
@@ -66,7 +53,6 @@ public class main extends JavaPlugin {
         thisplugin = this;
         
         getServer().getScheduler().runTaskTimer(this, new Runnable() {
-            
             @Override
             public void run() {
                 if(runTick.damager != null && runTick.victim != null) {
@@ -74,18 +60,15 @@ public class main extends JavaPlugin {
                         runTick.groundy = runTick.victim.getLocation().getY();
                         runTick.hitcount = 0;
                     }
-                    
                     if(!shouldThirdSprintHit) {
-                        if(runTick.victim != null && runTick.damager != null && runTick.nmsPlayer != null && runTick.nmsdPlayer != null) {
-                            if(runTick.victim.getLocation().getY() > runTick.groundy + 0.4) {
-                                runTick.damager.setSprinting(false);
-                            } else runTick.damager.setSprinting(true);
+                        if(runTick.victim.getLocation().getY() > runTick.groundy + 0.4) {
+                            runTick.damager.setSprinting(false);
+                        } else {
+                            runTick.damager.setSprinting(true);
                         }
                     }
                 }
-                
             }
-            
         }, 0, 0);
         
         Bukkit.getScheduler().runTaskTimer(this, () -> {
@@ -128,7 +111,6 @@ public class main extends JavaPlugin {
     
                     if (subject != null) {
                         if (event.getPlayer().getUniqueId().equals(subject.getUniqueId())) return;
-                        
                         event.setCancelled(true);
                     }
                 }
@@ -152,25 +134,16 @@ public class main extends JavaPlugin {
 
         for (Player observer : Bukkit.getOnlinePlayers()) {
             if (observer.getUniqueId().equals(subject.getUniqueId())) continue;
-
             try {
                 ProtocolLibrary.getProtocolManager().sendServerPacket(observer, teleport, false);
                 ProtocolLibrary.getProtocolManager().sendServerPacket(observer, headLook, false);
-            } catch (Exception e) {
-            }
+            } catch (Exception e) {}
         }
-    }
-    private Player getPlayerByEntityId(int id) {
-        for (Player p : Bukkit.getOnlinePlayers()) {
-            if (p.getEntityId() == id) return p;
-        }
-        return null;
     }
 
     public static void read() {
         try {
             BufferedReader bfr = new BufferedReader(new FileReader(folderPath + "config.txt"));
-            
             try {
                 runTick.customhit = Boolean.parseBoolean(bfr.readLine().replace("enabled: ", ""));
                 runTick.intmaxdmtick = Integer.parseInt(bfr.readLine().replace(hitdelaydesc, ""));
@@ -180,32 +153,24 @@ public class main extends JavaPlugin {
                 shouldThirdSprintHit = Boolean.parseBoolean(bfr.readLine().replace(thirdsprinthitdesc, ""));
                 DELAY = Integer.parseInt(bfr.readLine().replace(delaymovedesc, ""));
                 runTick.consistantkb = Boolean.parseBoolean(bfr.readLine().replace(consistantkbdesc, ""));
-                
                 bfr.close();
-            } catch (IOException e) {
-            }
+            } catch (IOException e) {}
         } catch (FileNotFoundException e) {
             try {
                 Files.createDirectories(Paths.get(folderPath));
-                
                 try {
                     BufferedWriter bf = new BufferedWriter(new FileWriter(folderPath + "config.txt"));
-                    
-                    bf.write("enabled: " + true); bf.newLine();
-                    bf.write(hitdelaydesc + 17); bf.newLine();
-                    bf.write(damagedesc + 0.7); bf.newLine();
-                    bf.write(cpslimitingdesc + true); bf.newLine();
-                    bf.write(cpslimitdesc + 20); bf.newLine();
-                    bf.write(thirdsprinthitdesc + false); bf.newLine();
-                    bf.write(delaymovedesc + 2); bf.newLine();
-                    bf.write(consistantkbdesc + true); bf.newLine();
-                    
+                    bf.write("enabled: true"); bf.newLine();
+                    bf.write(hitdelaydesc + "17"); bf.newLine();
+                    bf.write(damagedesc + "0.7"); bf.newLine();
+                    bf.write(cpslimitingdesc + "true"); bf.newLine();
+                    bf.write(cpslimitdesc + "20"); bf.newLine();
+                    bf.write(thirdsprinthitdesc + "false"); bf.newLine();
+                    bf.write(delaymovedesc + "2"); bf.newLine();
+                    bf.write(consistantkbdesc + "true"); bf.newLine();
                     bf.close();
-                } catch (IOException e1) {
-                }
-            } catch (IOException e1) {
-            }
+                } catch (IOException e1) {}
+            } catch (IOException e1) {}
         }
     }
-
 }

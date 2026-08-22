@@ -21,7 +21,7 @@ jobs:
           java-version: '8'
           distribution: 'temurin'
 
-      - name: Manually Install ProtocolLib (Bypasses Broken Maven Repositories)
+      - name: Manually Install ProtocolLib
         run: |
           wget https://github.com/dmulloy2/ProtocolLib/releases/download/4.8.0/ProtocolLib.jar -O ProtocolLib.jar
           mvn install:install-file -Dfile=ProtocolLib.jar -DgroupId=com.comphenix.protocol -DartifactId=ProtocolLib -Dversion=4.8.0 -Dpackaging=jar

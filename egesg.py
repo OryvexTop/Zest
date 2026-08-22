@@ -1,7 +1,7 @@
 import os
 
 PROJECT_FILES = {
-    # 1. Maven Configuration (With NMS and ProtocolLib)
+    # 1. Maven Configuration
     "pom.xml": """<project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -21,17 +21,14 @@ PROJECT_FILES = {
     </properties>
 
     <repositories>
-        <!-- For standard Paper/Spigot API -->
         <repository>
             <id>papermc-repo</id>
             <url>https://repo.papermc.io/repository/maven-public/</url>
         </repository>
-        <!-- For NMS (net.minecraft.server.v1_8_R3) -->
         <repository>
             <id>codemc-nms</id>
             <url>https://repo.codemc.io/repository/nms/</url>
         </repository>
-        <!-- Fallback ProtocolLib Repo -->
         <repository>
             <id>dmulloy2-repo</id>
             <url>https://repo.dmulloy2.net/repository/public/</url>
@@ -39,14 +36,12 @@ PROJECT_FILES = {
     </repositories>
 
     <dependencies>
-        <!-- Spigot Server with NMS mappings -->
         <dependency>
             <groupId>org.spigotmc</groupId>
             <artifactId>spigot</artifactId>
             <version>1.8.8-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
-        <!-- ProtocolLib (Resolved locally via GitHub Actions step) -->
         <dependency>
             <groupId>com.comphenix.protocol</groupId>
             <artifactId>ProtocolLib</artifactId>
@@ -94,7 +89,7 @@ api-version: 1.8
 depend: [ProtocolLib]
 commands:
   reloadhit:
-    description: Reloads the MineStormRBW hit config
+    description: Reloads the MineStormRBW config
 """,
 
     # 3. ExecuteHit.java
@@ -108,71 +103,43 @@ import org.bukkit.entity.Player;
 import net.md_5.bungee.api.ChatColor;
 
 public class ExecuteHit implements CommandExecutor {
-
     @Override
     public boolean onCommand(CommandSender arg0, Command arg1, String arg2, String[] arg3) {
         main.read();
         if(arg0 instanceof Player) {
             Player player = (Player) arg0;
-            player.sendMessage(ChatColor.GREEN + "Reloaded hit!");
+            player.sendMessage(ChatColor.GREEN + "MineStormRBW Config Reloaded!");
         }
         return false;
     }
-
 }
 """,
 
-    # 4. runTick.java (Contains NMS and Logic exactly as provided)
+    # 4. runTick.java (Zest Tap Engine injected into HypixelHits framework)
     "src/main/java/com/minestorm/rbw/MineStormRBW/runTick.java": """package com.minestorm.rbw.MineStormRBW;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.FileNotFoundException;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
-import org.bukkit.Bukkit;
-import org.bukkit.GameMode;
-import org.bukkit.Material;
-import org.bukkit.World;
-import org.bukkit.block.Block;
-import org.bukkit.block.Chest;
-import org.bukkit.entity.Entity;
-import org.bukkit.entity.EntityType;
-import org.bukkit.entity.Fireball;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.block.Action;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
-import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.player.PlayerAnimationEvent;
 import org.bukkit.event.player.PlayerAnimationType;
-import org.bukkit.event.player.PlayerInteractAtEntityEvent;
-import org.bukkit.event.player.PlayerInteractEntityEvent;
-import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.material.EnderChest;
-import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
-
-import com.comphenix.protocol.ProtocolLibrary;
-
-import net.md_5.bungee.api.ChatColor;
 
 public class runTick implements Listener {
     public static double cpslimit = 16;
-    private final Map<UUID, List<Long>> playerClicks = new HashMap<>();
+    private final Map<UUID, List<Long>> playerClicks = new ConcurrentHashMap<>();
+    
+    // ZEST TAP: Track last time damaged to calculate Hit-Selection delays
+    private final Map<UUID, Long> lastHitTaken = new ConcurrentHashMap<>();
     
     public static boolean customhit = true, consistantkb;
     public static int intmaxdmtick;
@@ -181,88 +148,114 @@ public class runTick implements Listener {
     
     public static Player victim;
     public static Player damager;
-    public static net.minecraft.server.v1_8_R3.EntityPlayer nmsPlayer;
-    public static net.minecraft.server.v1_8_R3.EntityPlayer nmsdPlayer;
     
-    Map<UUID, Integer> hitCount = new HashMap<>();
-    
-    public static int hitcombo;
     public main m;
     
     public runTick(main m) {
         this.m = m;
     }
+
     private void recordClick(UUID uuid) {
         playerClicks.putIfAbsent(uuid, new ArrayList<>());
         playerClicks.get(uuid).add(System.currentTimeMillis());
     }
+
     private int getCPS(UUID uuid) {
         if (!playerClicks.containsKey(uuid)) return 0;
-        
         long now = System.currentTimeMillis();
         List<Long> clicks = playerClicks.get(uuid);
         clicks.removeIf(timestamp -> now - timestamp > 1000);
-        
         return clicks.size();
     }
+
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         playerClicks.remove(event.getPlayer().getUniqueId());
+        lastHitTaken.remove(event.getPlayer().getUniqueId());
     }
+
     @EventHandler
     public void interact(PlayerAnimationEvent e) {
         if(e.getAnimationType().equals(PlayerAnimationType.ARM_SWING)) {
-            UUID uuid = e.getPlayer().getUniqueId();
-            recordClick(uuid);
+            recordClick(e.getPlayer().getUniqueId());
         }
     }
-    @EventHandler(priority = EventPriority.HIGHEST)
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onHit(EntityDamageByEntityEvent event) {
         if (event.getEntity() instanceof Player && event.getDamager() instanceof Player) {
             victim = (Player) event.getEntity();
             damager = (Player) event.getDamager();
-            nmsPlayer = ((org.bukkit.craftbukkit.v1_8_R3.entity.CraftPlayer) damager).getHandle();
-            nmsdPlayer = ((org.bukkit.craftbukkit.v1_8_R3.entity.CraftPlayer) victim).getHandle();
             UUID damagerUUID = damager.getUniqueId();
             
-            int currentCPS = getCPS(damagerUUID);
-            if (currentCPS > cpslimit) {
-                event.setCancelled(true);
-                playerClicks.remove(damagerUUID);
-                return;
+            // HypixelHits CPS Limiter
+            if (main.shouldCheckCPS) {
+                int currentCPS = getCPS(damagerUUID);
+                if (currentCPS > cpslimit) {
+                    event.setCancelled(true);
+                    playerClicks.remove(damagerUUID);
+                    return;
+                }
             }
             
-            if(customhit) {
-                if(victim.isOnGround()) hitcount = 0;
+            if (customhit) {
+                if (victim.isOnGround()) hitcount = 0;
                 else hitcount++;
-                if(hitcount >= 4) hitcount = 0;
+                if (hitcount >= 4) hitcount = 0;
                 
                 event.setDamage(event.getDamage() * damage);
-                victim.setMaximumNoDamageTicks(intmaxdmtick);
+                victim.setMaximumNoDamageTicks(intmaxdmtick); // Custom Hit Delay
                 
-                if(consistantkb) {
-                    if(hitcount >= 1 && !victim.isOnGround()) {
-                        if(damager.getLocation().distance(victim.getLocation()) > 2.5) {
-                            if(nmsdPlayer.hurtTicks > 0) {
-                                Vector kb = new Vector(0, 0, 0);
-                                if(hitcount == 1) kb.setY(-0.3);
-                                if(hitcount == 2) kb.setY(-0.7);
-                                victim.setVelocity(kb);
-                            }
+                if (consistantkb) {
+                    long now = System.currentTimeMillis();
+                    long attackerLastDamage = lastHitTaken.getOrDefault(damagerUUID, 0L);
+                    
+                    // ZEST TAP LOGIC: Attacker got hit recently? Activate counter-burst
+                    boolean isZestCounter = (now - attackerLastDamage) >= 50 && (now - attackerLastDamage) <= 480;
+                    lastHitTaken.put(victim.getUniqueId(), now);
+
+                    // ONE-TICK DELAY: This entirely fixes "NO DELAY / NO KB" bug from the old code
+                    m.getServer().getScheduler().runTask(m, () -> {
+                        if (victim.isOnline() && damager.isOnline()) {
+                            applyZestTapKnockback(victim, damager, isZestCounter);
                         }
-                    }
+                    });
                 }
             } else {
                 victim.setMaximumNoDamageTicks(20);
-                event.setDamage(event.getDamage());
             }
         }
     }
 
+    private void applyZestTapKnockback(Player victim, Player attacker, boolean isZestCounter) {
+        Vector dir = attacker.getLocation().getDirection().setY(0);
+        if (dir.lengthSquared() < 0.001) {
+            dir = new Vector(0, 0, 1);
+        } else {
+            dir.normalize();
+        }
+
+        // Zest Base Forces
+        double finalH = attacker.isSprinting() ? 0.440 : 0.385;
+        double finalV = attacker.isSprinting() ? 0.470 : 0.345;
+
+        // Hit-Select Counter Burst
+        if (isZestCounter) {
+            finalH = 0.495;  // Extremely sharp horizontal push
+            finalV = 0.310;  // Flatten the vertical to lock them in a combo
+        }
+
+        // Consistent Airborne Clamp (Never fly too high)
+        if (!victim.isOnGround()) {
+            finalV = 0.260; 
+        }
+
+        victim.setVelocity(new Vector(dir.getX() * finalH, finalV, dir.getZ() * finalH));
+    }
 }
 """,
 
-    # 5. main.java (Contains ProtocolLib hooks and task scheduling)
+    # 5. main.java
     "src/main/java/com/minestorm/rbw/MineStormRBW/main.java": """package com.minestorm.rbw.MineStormRBW;
 
 import java.io.BufferedReader;
@@ -277,33 +270,20 @@ import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
-import java.util.Random;
 import java.util.UUID;
 
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.craftbukkit.v1_8_R3.entity.CraftPlayer;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.util.Vector;
 
 import com.comphenix.protocol.PacketType;
 import com.comphenix.protocol.ProtocolLibrary;
-import com.comphenix.protocol.ProtocolManager;
 import com.comphenix.protocol.events.ListenerPriority;
 import com.comphenix.protocol.events.PacketAdapter;
 import com.comphenix.protocol.events.PacketContainer;
 import com.comphenix.protocol.events.PacketEvent;
-
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelDuplexHandler;
-import io.netty.channel.ChannelHandlerContext;
-import net.minecraft.server.v1_8_R3.EntityPlayer;
 
 public class main extends JavaPlugin {
     public static Plugin thisplugin;
@@ -319,7 +299,7 @@ public class main extends JavaPlugin {
     public static String cpslimitdesc = "CPS limit (hypixel comobing won't work if the player is clicking beyond this value in a second): ";
     public static String thirdsprinthitdesc = "Third Sprint Hit (Enable sprint hit for the third combo hit): ";
     public static String delaymovedesc = "Movement Tick Delay (Delay every player's movement by this value): ";
-    public static String consistantkbdesc = "Consistant KB (Combo KB feels more consistant, hit trading might be weird): ";
+    public static String consistantkbdesc = "Consistant KB (Activate Zest Tap Engine): ";
     
     public static String folderPath = Paths.get("").toAbsolutePath().toString() + File.separator + "plugins" + File.separator + "MineStormRBW" + File.separator;
     
@@ -331,7 +311,6 @@ public class main extends JavaPlugin {
         thisplugin = this;
         
         getServer().getScheduler().runTaskTimer(this, new Runnable() {
-            
             @Override
             public void run() {
                 if(runTick.damager != null && runTick.victim != null) {
@@ -339,18 +318,15 @@ public class main extends JavaPlugin {
                         runTick.groundy = runTick.victim.getLocation().getY();
                         runTick.hitcount = 0;
                     }
-                    
                     if(!shouldThirdSprintHit) {
-                        if(runTick.victim != null && runTick.damager != null && runTick.nmsPlayer != null && runTick.nmsdPlayer != null) {
-                            if(runTick.victim.getLocation().getY() > runTick.groundy + 0.4) {
-                                runTick.damager.setSprinting(false);
-                            } else runTick.damager.setSprinting(true);
+                        if(runTick.victim.getLocation().getY() > runTick.groundy + 0.4) {
+                            runTick.damager.setSprinting(false);
+                        } else {
+                            runTick.damager.setSprinting(true);
                         }
                     }
                 }
-                
             }
-            
         }, 0, 0);
         
         Bukkit.getScheduler().runTaskTimer(this, () -> {
@@ -393,7 +369,6 @@ public class main extends JavaPlugin {
     
                     if (subject != null) {
                         if (event.getPlayer().getUniqueId().equals(subject.getUniqueId())) return;
-                        
                         event.setCancelled(true);
                     }
                 }
@@ -417,25 +392,16 @@ public class main extends JavaPlugin {
 
         for (Player observer : Bukkit.getOnlinePlayers()) {
             if (observer.getUniqueId().equals(subject.getUniqueId())) continue;
-
             try {
                 ProtocolLibrary.getProtocolManager().sendServerPacket(observer, teleport, false);
                 ProtocolLibrary.getProtocolManager().sendServerPacket(observer, headLook, false);
-            } catch (Exception e) {
-            }
+            } catch (Exception e) {}
         }
-    }
-    private Player getPlayerByEntityId(int id) {
-        for (Player p : Bukkit.getOnlinePlayers()) {
-            if (p.getEntityId() == id) return p;
-        }
-        return null;
     }
 
     public static void read() {
         try {
             BufferedReader bfr = new BufferedReader(new FileReader(folderPath + "config.txt"));
-            
             try {
                 runTick.customhit = Boolean.parseBoolean(bfr.readLine().replace("enabled: ", ""));
                 runTick.intmaxdmtick = Integer.parseInt(bfr.readLine().replace(hitdelaydesc, ""));
@@ -445,38 +411,30 @@ public class main extends JavaPlugin {
                 shouldThirdSprintHit = Boolean.parseBoolean(bfr.readLine().replace(thirdsprinthitdesc, ""));
                 DELAY = Integer.parseInt(bfr.readLine().replace(delaymovedesc, ""));
                 runTick.consistantkb = Boolean.parseBoolean(bfr.readLine().replace(consistantkbdesc, ""));
-                
                 bfr.close();
-            } catch (IOException e) {
-            }
+            } catch (IOException e) {}
         } catch (FileNotFoundException e) {
             try {
                 Files.createDirectories(Paths.get(folderPath));
-                
                 try {
                     BufferedWriter bf = new BufferedWriter(new FileWriter(folderPath + "config.txt"));
-                    
-                    bf.write("enabled: " + true); bf.newLine();
-                    bf.write(hitdelaydesc + 17); bf.newLine();
-                    bf.write(damagedesc + 0.7); bf.newLine();
-                    bf.write(cpslimitingdesc + true); bf.newLine();
-                    bf.write(cpslimitdesc + 20); bf.newLine();
-                    bf.write(thirdsprinthitdesc + false); bf.newLine();
-                    bf.write(delaymovedesc + 2); bf.newLine();
-                    bf.write(consistantkbdesc + true); bf.newLine();
-                    
+                    bf.write("enabled: true"); bf.newLine();
+                    bf.write(hitdelaydesc + "17"); bf.newLine();
+                    bf.write(damagedesc + "0.7"); bf.newLine();
+                    bf.write(cpslimitingdesc + "true"); bf.newLine();
+                    bf.write(cpslimitdesc + "20"); bf.newLine();
+                    bf.write(thirdsprinthitdesc + "false"); bf.newLine();
+                    bf.write(delaymovedesc + "2"); bf.newLine();
+                    bf.write(consistantkbdesc + "true"); bf.newLine();
                     bf.close();
-                } catch (IOException e1) {
-                }
-            } catch (IOException e1) {
-            }
+                } catch (IOException e1) {}
+            } catch (IOException e1) {}
         }
     }
-
 }
 """,
 
-    # 6. GitHub Actions Build File with ProtocolLib Local Injection (Fixes Maven Error)
+    # 6. GitHub Actions Build File with Manual ProtocolLib Installation
     ".github/workflows/build.yml": """name: Build & Release Plugin
 
 on:
@@ -500,7 +458,7 @@ jobs:
           java-version: '8'
           distribution: 'temurin'
 
-      - name: Manually Install ProtocolLib (Bypasses Broken Maven Repositories)
+      - name: Manually Install ProtocolLib
         run: |
           wget https://github.com/dmulloy2/ProtocolLib/releases/download/4.8.0/ProtocolLib.jar -O ProtocolLib.jar
           mvn install:install-file -Dfile=ProtocolLib.jar -DgroupId=com.comphenix.protocol -DartifactId=ProtocolLib -Dversion=4.8.0 -Dpackaging=jar
@@ -529,7 +487,7 @@ jobs:
 }
 
 def create_project():
-    print("[*] Generating MineStormRBW project structure...")
+    print("[*] Generating MineStormRBW with Zest Tap Engine...")
     for filepath, content in PROJECT_FILES.items():
         dir_name = os.path.dirname(filepath)
         if dir_name:
