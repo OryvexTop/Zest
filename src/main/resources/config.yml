@@ -1,0 +1,8 @@
+# Zest Knockback Engine Settings
+knockback:
+  horizontal: 0.385
+  vertical: 0.345
+  sprint-horizontal: 0.440
+  sprint-vertical: 0.125
+  max-vertical-limit: 0.400
+  friction-factor: 0.960
