@@ -17,27 +17,29 @@
     </properties>
 
     <repositories>
-        <!-- PaperMC Repo (Reliable 1.8 mirror) -->
+        <!-- PaperMC Archive -->
         <repository>
-            <id>papermc-repo</id>
+            <id>papermc</id>
             <url>https://repo.papermc.io/repository/maven-public/</url>
         </repository>
-        <!-- CodeMC Repo -->
+        <!-- JitPack 1.8 Mirror -->
         <repository>
-            <id>codemc-repo</id>
-            <url>https://repo.codemc.io/repository/maven-public/</url>
-        </repository>
-        <!-- Spigot Repo -->
-        <repository>
-            <id>spigot-repo</id>
-            <url>https://hub.spigotmc.org/nexus/content/repositories/snapshots/</url>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
         </repository>
     </repositories>
 
     <dependencies>
+        <!-- Paper 1.8.8 API (Fully compatible with Spigot 1.8.8, contains all chat/craftbukkit dependencies) -->
         <dependency>
-            <groupId>org.github.spigot</groupId>
-            <artifactId>spigot-api</artifactId>
+            <groupId>com.github.TechFortress</groupId>
+            <artifactId>PaperLib</artifactId>
+            <version>1.0.8</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.github.paperspigot</groupId>
+            <artifactId>paperspigot-api</artifactId>
             <version>1.8.8-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
