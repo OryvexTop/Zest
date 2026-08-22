@@ -28,14 +28,12 @@
     </repositories>
 
     <dependencies>
-        <!-- Spigot Server with full NMS (net.minecraft.server) -->
         <dependency>
             <groupId>org.spigotmc</groupId>
             <artifactId>spigot</artifactId>
             <version>1.8.8-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
-        <!-- ProtocolLib (Resolved via manual download in GitHub Actions) -->
         <dependency>
             <groupId>com.comphenix.protocol</groupId>
             <artifactId>ProtocolLib</artifactId>

@@ -61,7 +61,7 @@ public class main extends JavaPlugin {
                         runTick.hitcount = 0;
                     }
                     if(!shouldThirdSprintHit) {
-                        if(runTick.victim != null && runTick.damager != null && runTick.nmsPlayer != null && runTick.nmsdPlayer != null) {
+                        if(runTick.victim != null && runTick.damager != null) {
                             if(runTick.victim.getLocation().getY() > runTick.groundy + 0.4) {
                                 runTick.damager.setSprinting(false);
                             } else runTick.damager.setSprinting(true);
@@ -100,7 +100,6 @@ public class main extends JavaPlugin {
                 if(DELAY > 0) {
                     PacketContainer packet = event.getPacket();
                     int entityId = packet.getIntegers().read(0);
-                    
                     Player subject = null;
                     for (Player p : Bukkit.getOnlinePlayers()) {
                         if (p.getEntityId() == entityId) {
@@ -108,7 +107,6 @@ public class main extends JavaPlugin {
                             break;
                         }
                     }
-    
                     if (subject != null) {
                         if (event.getPlayer().getUniqueId().equals(subject.getUniqueId())) return;
                         event.setCancelled(true);

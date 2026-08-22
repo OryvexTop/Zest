@@ -27,12 +27,7 @@ public class runTick implements Listener {
     
     public static Player victim;
     public static Player damager;
-    public static net.minecraft.server.v1_8_R3.EntityPlayer nmsPlayer;
-    public static net.minecraft.server.v1_8_R3.EntityPlayer nmsdPlayer;
     
-    Map<UUID, Integer> hitCount = new HashMap<>();
-    
-    public static int hitcombo;
     public main m;
     
     public runTick(main m) {
@@ -44,11 +39,9 @@ public class runTick implements Listener {
     }
     private int getCPS(UUID uuid) {
         if (!playerClicks.containsKey(uuid)) return 0;
-        
         long now = System.currentTimeMillis();
         List<Long> clicks = playerClicks.get(uuid);
         clicks.removeIf(timestamp -> now - timestamp > 1000);
-        
         return clicks.size();
     }
     @EventHandler
@@ -58,18 +51,21 @@ public class runTick implements Listener {
     @EventHandler
     public void interact(PlayerAnimationEvent e) {
         if(e.getAnimationType().equals(PlayerAnimationType.ARM_SWING)) {
-            UUID uuid = e.getPlayer().getUniqueId();
-            recordClick(uuid);
+            recordClick(e.getPlayer().getUniqueId());
         }
     }
-    @EventHandler(priority = EventPriority.HIGHEST)
+    
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onHit(EntityDamageByEntityEvent event) {
         if (event.getEntity() instanceof Player && event.getDamager() instanceof Player) {
             victim = (Player) event.getEntity();
             damager = (Player) event.getDamager();
-            nmsPlayer = ((org.bukkit.craftbukkit.v1_8_R3.entity.CraftPlayer) damager).getHandle();
-            nmsdPlayer = ((org.bukkit.craftbukkit.v1_8_R3.entity.CraftPlayer) victim).getHandle();
             UUID damagerUUID = damager.getUniqueId();
+            
+            // 1. FIX: Block spam hits if victim is still in NoDamageTicks window!
+            if (victim.getNoDamageTicks() > victim.getMaximumNoDamageTicks() / 2.0F) {
+                return;
+            }
             
             int currentCPS = getCPS(damagerUUID);
             if (currentCPS > cpslimit) {
@@ -84,25 +80,35 @@ public class runTick implements Listener {
                 if(hitcount >= 4) hitcount = 0;
                 
                 event.setDamage(event.getDamage() * damage);
+                
+                // 2. FIX: Properly enforce the Hit Delay
                 victim.setMaximumNoDamageTicks(intmaxdmtick);
+                victim.setNoDamageTicks(intmaxdmtick);
                 
                 if(consistantkb) {
-                    if(hitcount >= 1 && !victim.isOnGround()) {
-                        if(damager.getLocation().distance(victim.getLocation()) > 2.5) {
-                            if(nmsdPlayer.hurtTicks > 0) {
-                                Vector kb = new Vector(0, 0, 0);
-                                if(hitcount == 1) kb.setY(-0.3);
-                                if(hitcount == 2) kb.setY(-0.7);
-                                victim.setVelocity(kb);
+                    // 3. FIX: Apply 1-tick delay knockback with proper horizontal math!
+                    m.getServer().getScheduler().runTask(m, () -> {
+                        if (!victim.isOnline() || !damager.isOnline()) return;
+
+                        Vector direction = damager.getLocation().getDirection().setY(0).normalize();
+                        double horizontal = damager.isSprinting() ? 0.45 : 0.38;
+                        double vertical = 0.34; // Base jump height
+
+                        if(hitcount >= 1 && !victim.isOnGround()) {
+                            if(damager.getLocation().distance(victim.getLocation()) > 2.5) {
+                                // Hypixel consistent KB: dampen the Y axis to stay in combo, BUT KEEP X/Z
+                                if(hitcount == 1) vertical = -0.10;
+                                if(hitcount == 2) vertical = -0.30;
                             }
                         }
-                    }
+                        
+                        // Set true pushback
+                        victim.setVelocity(new Vector(direction.getX() * horizontal, vertical, direction.getZ() * horizontal));
+                    });
                 }
             } else {
                 victim.setMaximumNoDamageTicks(20);
-                event.setDamage(event.getDamage());
             }
         }
     }
-
 }
