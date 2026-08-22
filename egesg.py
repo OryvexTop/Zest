@@ -1,8 +1,7 @@
 import os
-import stat
 
 PROJECT_FILES = {
-    # 1. Maven POM Configuration
+    # 1. Maven Configuration with PaperSpigot & ProtocolLib 1.8.8
     "pom.xml": """<project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -23,20 +22,26 @@ PROJECT_FILES = {
 
     <repositories>
         <repository>
-            <id>spigot-repo</id>
-            <url>https://hub.spigotmc.org/nexus/content/repositories/snapshots/</url>
+            <id>papermc-repo</id>
+            <url>https://repo.papermc.io/repository/maven-public/</url>
         </repository>
         <repository>
-            <id>sonatype-snapshots</id>
-            <url>https://oss.sonatype.org/content/repositories/snapshots/</url>
+            <id>dmulloy2-repo</id>
+            <url>https://repo.dmulloy2.net/repository/public/</url>
         </repository>
     </repositories>
 
     <dependencies>
         <dependency>
-            <groupId>org.spigotmc</groupId>
-            <artifactId>spigot-api</artifactId>
+            <groupId>org.github.paperspigot</groupId>
+            <artifactId>paperspigot-api</artifactId>
             <version>1.8.8-R0.1-SNAPSHOT</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.comphenix.protocol</groupId>
+            <artifactId>ProtocolLib</artifactId>
+            <version>4.8.0</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>
@@ -77,124 +82,316 @@ version: 1.0.0
 main: com.zest.knockback.ZestPlugin
 author: Muvixo
 api-version: 1.8
-description: High-performance competitive Zest-style W-Tap knockback engine for Spigot 1.8.8
+softdepend: [ProtocolLib]
+commands:
+  zestreload:
+    description: Reloads the knockback and hit config
+    permission: zest.admin
+    aliases: [reloadhit]
 """,
 
-    # 3. Default Configuration File
-    "src/main/resources/config.yml": """# Zest Knockback Engine Settings
-knockback:
-  horizontal: 0.385
-  vertical: 0.345
-  sprint-horizontal: 0.440
-  sprint-vertical: 0.125
-  max-vertical-limit: 0.400
-  friction-factor: 0.960
-""",
-
-    # 4. Main Plugin Entrypoint
+    # 3. Main Plugin Class (Packet movement simulation & Sprint handler)
     "src/main/java/com/zest/knockback/ZestPlugin.java": """package com.zest.knockback;
 
+import com.comphenix.protocol.PacketType;
+import com.comphenix.protocol.ProtocolLibrary;
+import com.comphenix.protocol.events.ListenerPriority;
+import com.comphenix.protocol.events.PacketAdapter;
+import com.comphenix.protocol.events.PacketContainer;
+import com.comphenix.protocol.events.PacketEvent;
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
-public class ZestPlugin extends JavaPlugin {
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.Map;
+import java.util.UUID;
 
-    private static ZestPlugin instance;
+public class ZestPlugin extends JavaPlugin {
+    public static ZestPlugin instance;
+    private final Map<UUID, LinkedList<Location>> historyMap = new HashMap<>();
+
+    public static int DELAY = 2;
+    public static boolean shouldCheckCPS = true;
+    public static boolean shouldThirdSprintHit = false;
+
+    public static final String HITDELAY_DESC = "hit delay (how much delay of hurt time before each hit): ";
+    public static final String DAMAGE_DESC = "damage multiplier (damage dealt multiplies by this value everytime a player combos): ";
+    public static final String CPS_LIMITING_DESC = "CPS limiting (enable checking whether the comboer is clicking too much): ";
+    public static final String CPS_LIMIT_DESC = "CPS limit (hypixel comobing won't work if the player is clicking beyond this value in a second): ";
+    public static final String THIRD_SPRINT_HIT_DESC = "Third Sprint Hit (Enable sprint hit for the third combo hit): ";
+    public static final String DELAY_MOVE_DESC = "Movement Tick Delay (Delay every player's movement by this value): ";
+    public static final String CONSISTANT_KB_DESC = "Consistant KB (Combo KB feels more consistant, hit trading might be weird): ";
+
+    public static String folderPath;
 
     @Override
     public void onEnable() {
         instance = this;
-        saveDefaultConfig();
+        folderPath = getDataFolder().getAbsolutePath() + File.separator;
 
+        readConfig();
         getServer().getPluginManager().registerEvents(new ZestKnockbackListener(this), this);
-        getLogger().info("ZestKnockback has been successfully activated!");
+        getCommand("zestreload").setExecutor(new ExecuteHit());
+
+        // Sprint and Ground tracker loop
+        getServer().getScheduler().runTaskTimer(this, () -> {
+            if (ZestKnockbackListener.victim != null && ZestKnockbackListener.damager != null) {
+                if (ZestKnockbackListener.victim.isOnGround()) {
+                    ZestKnockbackListener.groundY = ZestKnockbackListener.victim.getLocation().getY();
+                    ZestKnockbackListener.hitCount = 0;
+                }
+
+                if (!shouldThirdSprintHit) {
+                    if (ZestKnockbackListener.victim.getLocation().getY() > ZestKnockbackListener.groundY + 0.4D) {
+                        ZestKnockbackListener.damager.setSprinting(false);
+                    } else {
+                        ZestKnockbackListener.damager.setSprinting(true);
+                    }
+                }
+            }
+        }, 0L, 1L);
+
+        // ProtocolLib Packet Movement Simulation
+        if (Bukkit.getPluginManager().isPluginEnabled("ProtocolLib")) {
+            Bukkit.getScheduler().runTaskTimer(this, () -> {
+                if (DELAY > 0) {
+                    for (Player subject : Bukkit.getOnlinePlayers()) {
+                        UUID uuid = subject.getUniqueId();
+                        historyMap.putIfAbsent(uuid, new LinkedList<>());
+                        LinkedList<Location> history = historyMap.get(uuid);
+
+                        history.addLast(subject.getLocation().clone());
+                        if (!history.isEmpty()) {
+                            Location delayedLoc = (history.size() > DELAY) ? history.removeFirst() : history.getFirst();
+                            broadcastDelayedPosition(subject, delayedLoc);
+                        }
+                    }
+                }
+            }, 0L, 1L);
+
+            ProtocolLibrary.getProtocolManager().addPacketListener(new PacketAdapter(this,
+                    ListenerPriority.HIGHEST,
+                    PacketType.Play.Server.ENTITY_TELEPORT,
+                    PacketType.Play.Server.REL_ENTITY_MOVE,
+                    PacketType.Play.Server.REL_ENTITY_MOVE_LOOK,
+                    PacketType.Play.Server.ENTITY_LOOK,
+                    PacketType.Play.Server.ENTITY_HEAD_ROTATION) {
+
+                @Override
+                public void onPacketSending(PacketEvent event) {
+                    if (DELAY > 0) {
+                        PacketContainer packet = event.getPacket();
+                        int entityId = packet.getIntegers().read(0);
+
+                        Player subject = null;
+                        for (Player p : Bukkit.getOnlinePlayers()) {
+                            if (p.getEntityId() == entityId) {
+                                subject = p;
+                                break;
+                            }
+                        }
+
+                        if (subject != null) {
+                            if (event.getPlayer().getUniqueId().equals(subject.getUniqueId())) return;
+                            event.setCancelled(true);
+                        }
+                    }
+                }
+            });
+        }
     }
 
-    @Override
-    public void onDisable() {
-        getLogger().info("ZestKnockback has been disabled.");
+    private void broadcastDelayedPosition(Player subject, Location loc) {
+        PacketContainer teleport = new PacketContainer(PacketType.Play.Server.ENTITY_TELEPORT);
+        teleport.getIntegers().write(0, subject.getEntityId());
+        teleport.getIntegers().write(1, (int) Math.floor(loc.getX() * 32.0D));
+        teleport.getIntegers().write(2, (int) Math.floor(loc.getY() * 32.0D));
+        teleport.getIntegers().write(3, (int) Math.floor(loc.getZ() * 32.0D));
+        teleport.getBytes().write(0, (byte) (loc.getYaw() * 256.0F / 360.0F));
+        teleport.getBytes().write(1, (byte) (loc.getPitch() * 256.0F / 360.0F));
+        teleport.getBooleans().write(0, true);
+
+        PacketContainer headLook = new PacketContainer(PacketType.Play.Server.ENTITY_HEAD_ROTATION);
+        headLook.getIntegers().write(0, subject.getEntityId());
+        headLook.getBytes().write(0, (byte) (loc.getYaw() * 256.0F / 360.0F));
+
+        for (Player observer : Bukkit.getOnlinePlayers()) {
+            if (observer.getUniqueId().equals(subject.getUniqueId())) continue;
+
+            try {
+                ProtocolLibrary.getProtocolManager().sendServerPacket(observer, teleport, false);
+                ProtocolLibrary.getProtocolManager().sendServerPacket(observer, headLook, false);
+            } catch (Exception ignored) {
+            }
+        }
     }
 
-    public static ZestPlugin getInstance() {
-        return instance;
+    public static void readConfig() {
+        File configFile = new File(folderPath + "config.txt");
+        if (!configFile.exists()) {
+            try {
+                Files.createDirectories(Paths.get(folderPath));
+                BufferedWriter bf = new BufferedWriter(new FileWriter(configFile));
+                bf.write("enabled: true"); bf.newLine();
+                bf.write(HITDELAY_DESC + "17"); bf.newLine();
+                bf.write(DAMAGE_DESC + "0.7"); bf.newLine();
+                bf.write(CPS_LIMITING_DESC + "true"); bf.newLine();
+                bf.write(CPS_LIMIT_DESC + "20"); bf.newLine();
+                bf.write(THIRD_SPRINT_HIT_DESC + "false"); bf.newLine();
+                bf.write(DELAY_MOVE_DESC + "2"); bf.newLine();
+                bf.write(CONSISTANT_KB_DESC + "true"); bf.newLine();
+                bf.close();
+            } catch (IOException ignored) {
+            }
+        }
+
+        try (BufferedReader bfr = new BufferedReader(new FileReader(configFile))) {
+            ZestKnockbackListener.customHit = Boolean.parseBoolean(bfr.readLine().replace("enabled: ", ""));
+            ZestKnockbackListener.maxDmTick = Integer.parseInt(bfr.readLine().replace(HITDELAY_DESC, ""));
+            ZestKnockbackListener.damageMult = Double.parseDouble(bfr.readLine().replace(DAMAGE_DESC, ""));
+            shouldCheckCPS = Boolean.parseBoolean(bfr.readLine().replace(CPS_LIMITING_DESC, ""));
+            ZestKnockbackListener.cpsLimit = Double.parseDouble(bfr.readLine().replace(CPS_LIMIT_DESC, ""));
+            shouldThirdSprintHit = Boolean.parseBoolean(bfr.readLine().replace(THIRD_SPRINT_HIT_DESC, ""));
+            DELAY = Integer.parseInt(bfr.readLine().replace(DELAY_MOVE_DESC, ""));
+            ZestKnockbackListener.consistantKB = Boolean.parseBoolean(bfr.readLine().replace(CONSISTANT_KB_DESC, ""));
+        } catch (Exception ignored) {
+        }
     }
 }
 """,
 
-    # 5. Knockback Listener
+    # 4. Listener Class (CPS Tracker & Consistent Y Knockback)
     "src/main/java/com/zest/knockback/ZestKnockbackListener.java": """package com.zest.knockback;
 
-import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.player.PlayerAnimationEvent;
+import org.bukkit.event.player.PlayerAnimationType;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.util.Vector;
+
+import java.util.*;
 
 public class ZestKnockbackListener implements Listener {
 
     private final ZestPlugin plugin;
+    public static double cpsLimit = 20.0D;
+    private final Map<UUID, List<Long>> playerClicks = new HashMap<>();
+
+    public static boolean customHit = true;
+    public static boolean consistantKB = true;
+    public static int maxDmTick = 17;
+    public static double damageMult = 0.7D;
+    public static double groundY;
+    public static int hitCount = 0;
+
+    public static Player victim;
+    public static Player damager;
 
     public ZestKnockbackListener(ZestPlugin plugin) {
         this.plugin = plugin;
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onEntityDamage(EntityDamageByEntityEvent event) {
-        if (!(event.getEntity() instanceof Player) || !(event.getDamager() instanceof Player)) {
-            return;
-        }
-
-        Player victim = (Player) event.getEntity();
-        Player attacker = (Player) event.getDamager();
-
-        // Check if victim is currently in damage immunity window
-        if (victim.getNoDamageTicks() > 10) {
-            return;
-        }
-
-        applyZestVelocity(victim, attacker);
+    private void recordClick(UUID uuid) {
+        playerClicks.putIfAbsent(uuid, new ArrayList<>());
+        playerClicks.get(uuid).add(System.currentTimeMillis());
     }
 
-    private void applyZestVelocity(Player victim, Player attacker) {
-        FileConfiguration config = plugin.getConfig();
+    private int getCPS(UUID uuid) {
+        if (!playerClicks.containsKey(uuid)) return 0;
+        long now = System.currentTimeMillis();
+        List<Long> clicks = playerClicks.get(uuid);
+        clicks.removeIf(timestamp -> (now - timestamp > 1000L));
+        return clicks.size();
+    }
 
-        double horizontalBase = config.getDouble("knockback.horizontal", 0.385);
-        double sprintHorizontal = config.getDouble("knockback.sprint-horizontal", 0.440);
-        double verticalBase = config.getDouble("knockback.vertical", 0.345);
-        double sprintVertical = config.getDouble("knockback.sprint-vertical", 0.125);
-        double maxVerticalLimit = config.getDouble("knockback.max-vertical-limit", 0.400);
-        double frictionFactor = config.getDouble("knockback.friction-factor", 0.960);
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        playerClicks.remove(event.getPlayer().getUniqueId());
+    }
 
-        double deltaX = victim.getLocation().getX() - attacker.getLocation().getX();
-        double deltaZ = victim.getLocation().getZ() - attacker.getLocation().getZ();
-
-        double distance = Math.hypot(deltaX, deltaZ);
-        if (distance <= 0.001) {
-            deltaX = 0.01;
-            deltaZ = 0.01;
-            distance = 0.014;
+    @EventHandler
+    public void onSwing(PlayerAnimationEvent e) {
+        if (e.getAnimationType().equals(PlayerAnimationType.ARM_SWING)) {
+            recordClick(e.getPlayer().getUniqueId());
         }
+    }
 
-        double dirX = deltaX / distance;
-        double dirZ = deltaZ / distance;
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onHit(EntityDamageByEntityEvent event) {
+        if (event.getEntity() instanceof Player && event.getDamager() instanceof Player) {
+            victim = (Player) event.getEntity();
+            damager = (Player) event.getDamager();
+            UUID damagerUUID = damager.getUniqueId();
 
-        double horizontalPush = attacker.isSprinting() ? sprintHorizontal : horizontalBase;
-        double verticalPush = attacker.isSprinting() ? (verticalBase + sprintVertical) : verticalBase;
+            if (ZestPlugin.shouldCheckCPS) {
+                int currentCPS = getCPS(damagerUUID);
+                if (currentCPS > cpsLimit) {
+                    event.setCancelled(true);
+                    playerClicks.remove(damagerUUID);
+                    return;
+                }
+            }
 
-        if (!victim.isOnGround()) {
-            verticalPush *= 0.85;
+            if (customHit) {
+                if (victim.isOnGround()) {
+                    hitCount = 0;
+                } else {
+                    hitCount++;
+                }
+
+                if (hitCount >= 4) {
+                    hitCount = 0;
+                }
+
+                event.setDamage(event.getDamage() * damageMult);
+                victim.setMaximumNoDamageTicks(maxDmTick);
+
+                if (consistantKB && hitCount >= 1 && !victim.isOnGround()) {
+                    if (damager.getLocation().distance(victim.getLocation()) > 2.5D) {
+                        Vector kb = new Vector(0, 0, 0);
+                        if (hitCount == 1) kb.setY(-0.3D);
+                        if (hitCount == 2) kb.setY(-0.7D);
+                        victim.setVelocity(kb);
+                    }
+                }
+            } else {
+                victim.setMaximumNoDamageTicks(20);
+            }
         }
+    }
+}
+""",
 
-        if (verticalPush > maxVerticalLimit) {
-            verticalPush = maxVerticalLimit;
+    # 5. Reload Command Executor
+    "src/main/java/com/zest/knockback/ExecuteHit.java": """package com.zest.knockback;
+
+import net.md_5.bungee.api.ChatColor;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandExecutor;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
+
+public class ExecuteHit implements CommandExecutor {
+
+    @Override
+    public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
+        ZestPlugin.readConfig();
+        if (sender instanceof Player) {
+            sender.sendMessage(ChatColor.GREEN + "[ZestKnockback] Config reloaded successfully!");
+        } else {
+            sender.sendMessage("[ZestKnockback] Config reloaded successfully!");
         }
-
-        Vector currentVel = victim.getVelocity();
-        double finalVelX = (currentVel.getX() * (1.0 - frictionFactor)) + (dirX * horizontalPush);
-        double finalVelZ = (currentVel.getZ() * (1.0 - frictionFactor)) + (dirZ * horizontalPush);
-
-        victim.setVelocity(new Vector(finalVelX, verticalPush, finalVelZ));
+        return true;
     }
 }
 """,
@@ -230,7 +427,7 @@ jobs:
       - name: Upload JAR Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ZestKnockback-Jar
+          name: ZestKnockback-1.0.0
           path: target/*.jar
           if-no-files-found: error
           retention-days: 7
@@ -248,9 +445,8 @@ jobs:
 }
 
 def create_project():
-    print("[*] Generating ZestKnockback project structure...")
+    print("[*] Generating HypixelHits-powered ZestKnockback project structure...")
     for filepath, content in PROJECT_FILES.items():
-        # Ensure directories exist
         dir_name = os.path.dirname(filepath)
         if dir_name:
             os.makedirs(dir_name, exist_ok=True)
@@ -260,13 +456,7 @@ def create_project():
         print(f" [+] Created: {filepath}")
 
     print("\n[✔] Project generated successfully!")
-    print("\nNext steps to compile with GitHub Actions:")
-    print(" 1. git init")
-    print(" 2. git add .")
-    print(" 3. git commit -m 'Initial commit: Zest Knockback Engine'")
-    print(" 4. git branch -M main")
-    print(" 5. git remote add origin <YOUR_GITHUB_REPO_URL>")
-    print(" 6. git push -u origin main")
+    print("Run 'python pusher.py' to commit and push changes to GitHub.")
 
 if __name__ == "__main__":
     create_project()
