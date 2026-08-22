@@ -41,7 +41,7 @@ public class main extends JavaPlugin {
     public static String cpslimitdesc = "CPS limit (hypixel comobing won't work if the player is clicking beyond this value in a second): ";
     public static String thirdsprinthitdesc = "Third Sprint Hit (Enable sprint hit for the third combo hit): ";
     public static String delaymovedesc = "Movement Tick Delay (Delay every player's movement by this value): ";
-    public static String consistantkbdesc = "Consistant KB (Activate Zest Tap Engine): ";
+    public static String consistantkbdesc = "Consistant KB (Combo KB feels more consistant, hit trading might be weird): ";
     
     public static String folderPath = Paths.get("").toAbsolutePath().toString() + File.separator + "plugins" + File.separator + "MineStormRBW" + File.separator;
     
@@ -61,10 +61,10 @@ public class main extends JavaPlugin {
                         runTick.hitcount = 0;
                     }
                     if(!shouldThirdSprintHit) {
-                        if(runTick.victim.getLocation().getY() > runTick.groundy + 0.4) {
-                            runTick.damager.setSprinting(false);
-                        } else {
-                            runTick.damager.setSprinting(true);
+                        if(runTick.victim != null && runTick.damager != null && runTick.nmsPlayer != null && runTick.nmsdPlayer != null) {
+                            if(runTick.victim.getLocation().getY() > runTick.groundy + 0.4) {
+                                runTick.damager.setSprinting(false);
+                            } else runTick.damager.setSprinting(true);
                         }
                     }
                 }
