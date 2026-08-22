@@ -15,14 +15,13 @@ import java.util.UUID;
 public class ZestKnockbackListener implements Listener {
 
     private final ZestPlugin plugin;
-    // Track timestamps of last damage taken for Hit-Selecting calculation
     private final Map<UUID, Long> lastDamageTaken = new HashMap<>();
 
     public ZestKnockbackListener(ZestPlugin plugin) {
         this.plugin = plugin;
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onEntityDamage(EntityDamageByEntityEvent event) {
         if (!(event.getEntity() instanceof Player) || !(event.getDamager() instanceof Player)) {
             return;
@@ -31,50 +30,53 @@ public class ZestKnockbackListener implements Listener {
         Player victim = (Player) event.getEntity();
         Player attacker = (Player) event.getDamager();
 
-        if (victim.getNoDamageTicks() > 10) {
-            return;
-        }
-
         long now = System.currentTimeMillis();
-        long attackerLastHitTaken = lastDamageTaken.getOrDefault(attacker.getUniqueId(), 0L);
-        boolean isCounterAttack = (now - attackerLastHitTaken) < 450; // Successful Hit-Select window (within ~400ms)
+        long attackerLastHit = lastDamageTaken.getOrDefault(attacker.getUniqueId(), 0L);
+        boolean isCounter = (now - attackerLastHit) <= 450;
 
         lastDamageTaken.put(victim.getUniqueId(), now);
 
-        // Schedule 1 tick later to override 1.8 vanilla velocity
+        // Apply knockback without relying on unvalidated tick states
         plugin.getServer().getScheduler().runTask(plugin, () -> {
-            applyHitSelectKnockback(victim, attacker, isCounterAttack);
+            applyKnockback(victim, attacker, isCounter);
         });
     }
 
-    private void applyHitSelectKnockback(Player victim, Player attacker, boolean isCounterAttack) {
+    private void applyKnockback(Player victim, Player attacker, boolean isCounter) {
         FileConfiguration config = plugin.getConfig();
 
-        double baseH = config.getDouble("knockback.horizontal", 0.400);
-        double baseV = config.getDouble("knockback.vertical", 0.320);
-        double counterBurstH = config.getDouble("knockback.hitselect-counter-horizontal", 0.490);
-        double blockReduction = config.getDouble("knockback.blockhit-dampening", 0.550);
+        double baseH = config.getDouble("knockback.horizontal", 0.40);
+        double counterH = config.getDouble("knockback.hitselect-counter-horizontal", 0.48);
+        double baseV = config.getDouble("knockback.vertical", 0.35);
 
-        Vector direction = attacker.getLocation().getDirection().setY(0).normalize();
+        // Calculate vector from difference between coordinates to avoid NaN
+        double dX = victim.getLocation().getX() - attacker.getLocation().getX();
+        double dZ = victim.getLocation().getZ() - attacker.getLocation().getZ();
 
-        double horizontalPush = isCounterAttack ? counterBurstH : baseH;
-        double verticalPush = baseV;
-
-        // Block-hitting dampening (Reduces KB when defending/timing hits)
-        if (victim.isBlocking()) {
-            horizontalPush *= blockReduction;
-            verticalPush *= 0.65;
+        double distance = Math.sqrt(dX * dX + dZ * dZ);
+        if (distance <= 0.0001) {
+            // Fallback to attacker yaw if standing on the exact same pixel
+            double yaw = Math.toRadians(attacker.getLocation().getYaw() + 90.0);
+            dX = Math.cos(yaw);
+            dZ = Math.sin(yaw);
+            distance = 1.0;
         }
 
-        // Clamp vertical launch to ensure flat trajectory
+        double dirX = dX / distance;
+        double dirZ = dZ / distance;
+
+        double horizontal = isCounter ? counterH : baseH;
+        double vertical = baseV;
+
+        if (attacker.isSprinting()) {
+            horizontal += 0.075;
+            vertical += 0.02;
+        }
+
         if (!victim.isOnGround()) {
-            verticalPush = Math.min(verticalPush * 0.70, 0.250);
+            vertical = Math.min(vertical * 0.85, 0.32);
         }
 
-        victim.setVelocity(new Vector(
-                direction.getX() * horizontalPush,
-                verticalPush,
-                direction.getZ() * horizontalPush
-        ));
+        victim.setVelocity(new Vector(dirX * horizontal, vertical, dirZ * horizontal));
     }
 }
