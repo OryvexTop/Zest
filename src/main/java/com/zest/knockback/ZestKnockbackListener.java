@@ -8,9 +8,15 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.util.Vector;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
 public class ZestKnockbackListener implements Listener {
 
     private final ZestPlugin plugin;
+    // Track timestamps of last damage taken for Hit-Selecting calculation
+    private final Map<UUID, Long> lastDamageTaken = new HashMap<>();
 
     public ZestKnockbackListener(ZestPlugin plugin) {
         this.plugin = plugin;
@@ -25,52 +31,50 @@ public class ZestKnockbackListener implements Listener {
         Player victim = (Player) event.getEntity();
         Player attacker = (Player) event.getDamager();
 
-        // Check if victim is currently in damage immunity window
         if (victim.getNoDamageTicks() > 10) {
             return;
         }
 
-        applyZestVelocity(victim, attacker);
+        long now = System.currentTimeMillis();
+        long attackerLastHitTaken = lastDamageTaken.getOrDefault(attacker.getUniqueId(), 0L);
+        boolean isCounterAttack = (now - attackerLastHitTaken) < 450; // Successful Hit-Select window (within ~400ms)
+
+        lastDamageTaken.put(victim.getUniqueId(), now);
+
+        // Schedule 1 tick later to override 1.8 vanilla velocity
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            applyHitSelectKnockback(victim, attacker, isCounterAttack);
+        });
     }
 
-    private void applyZestVelocity(Player victim, Player attacker) {
+    private void applyHitSelectKnockback(Player victim, Player attacker, boolean isCounterAttack) {
         FileConfiguration config = plugin.getConfig();
 
-        double horizontalBase = config.getDouble("knockback.horizontal", 0.385);
-        double sprintHorizontal = config.getDouble("knockback.sprint-horizontal", 0.440);
-        double verticalBase = config.getDouble("knockback.vertical", 0.345);
-        double sprintVertical = config.getDouble("knockback.sprint-vertical", 0.125);
-        double maxVerticalLimit = config.getDouble("knockback.max-vertical-limit", 0.400);
-        double frictionFactor = config.getDouble("knockback.friction-factor", 0.960);
+        double baseH = config.getDouble("knockback.horizontal", 0.400);
+        double baseV = config.getDouble("knockback.vertical", 0.320);
+        double counterBurstH = config.getDouble("knockback.hitselect-counter-horizontal", 0.490);
+        double blockReduction = config.getDouble("knockback.blockhit-dampening", 0.550);
 
-        double deltaX = victim.getLocation().getX() - attacker.getLocation().getX();
-        double deltaZ = victim.getLocation().getZ() - attacker.getLocation().getZ();
+        Vector direction = attacker.getLocation().getDirection().setY(0).normalize();
 
-        double distance = Math.hypot(deltaX, deltaZ);
-        if (distance <= 0.001) {
-            deltaX = 0.01;
-            deltaZ = 0.01;
-            distance = 0.014;
+        double horizontalPush = isCounterAttack ? counterBurstH : baseH;
+        double verticalPush = baseV;
+
+        // Block-hitting dampening (Reduces KB when defending/timing hits)
+        if (victim.isBlocking()) {
+            horizontalPush *= blockReduction;
+            verticalPush *= 0.65;
         }
 
-        double dirX = deltaX / distance;
-        double dirZ = deltaZ / distance;
-
-        double horizontalPush = attacker.isSprinting() ? sprintHorizontal : horizontalBase;
-        double verticalPush = attacker.isSprinting() ? (verticalBase + sprintVertical) : verticalBase;
-
+        // Clamp vertical launch to ensure flat trajectory
         if (!victim.isOnGround()) {
-            verticalPush *= 0.85;
+            verticalPush = Math.min(verticalPush * 0.70, 0.250);
         }
 
-        if (verticalPush > maxVerticalLimit) {
-            verticalPush = maxVerticalLimit;
-        }
-
-        Vector currentVel = victim.getVelocity();
-        double finalVelX = (currentVel.getX() * (1.0 - frictionFactor)) + (dirX * horizontalPush);
-        double finalVelZ = (currentVel.getZ() * (1.0 - frictionFactor)) + (dirZ * horizontalPush);
-
-        victim.setVelocity(new Vector(finalVelX, verticalPush, finalVelZ));
+        victim.setVelocity(new Vector(
+                direction.getX() * horizontalPush,
+                verticalPush,
+                direction.getZ() * horizontalPush
+        ));
     }
 }
