@@ -1,7 +1,7 @@
 import os
 
 PROJECT_FILES = {
-    # 1. Maven Configuration with NMS (CodeMC) & ProtocolLib (dmulloy2)
+    # 1. Maven Configuration (With NMS and ProtocolLib)
     "pom.xml": """<project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -31,7 +31,7 @@ PROJECT_FILES = {
             <id>codemc-nms</id>
             <url>https://repo.codemc.io/repository/nms/</url>
         </repository>
-        <!-- For ProtocolLib -->
+        <!-- Fallback ProtocolLib Repo -->
         <repository>
             <id>dmulloy2-repo</id>
             <url>https://repo.dmulloy2.net/repository/public/</url>
@@ -46,7 +46,7 @@ PROJECT_FILES = {
             <version>1.8.8-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
-        <!-- ProtocolLib -->
+        <!-- ProtocolLib (Resolved locally via GitHub Actions step) -->
         <dependency>
             <groupId>com.comphenix.protocol</groupId>
             <artifactId>ProtocolLib</artifactId>
@@ -86,7 +86,7 @@ PROJECT_FILES = {
 """,
 
     # 2. Plugin Manifest
-    "src/main/resources/plugin.yml": """name: HypixelHit
+    "src/main/resources/plugin.yml": """name: HypixelHits
 version: 1.0.0
 main: com.brugnevom.hypixelhits.HypixelHits.main
 author: brugnevom
@@ -476,7 +476,7 @@ public class main extends JavaPlugin {
 }
 """,
 
-    # 6. GitHub Actions Build File
+    # 6. GitHub Actions Build File with ProtocolLib Local Injection (Fixes Maven Error)
     ".github/workflows/build.yml": """name: Build & Release Plugin
 
 on:
@@ -499,7 +499,11 @@ jobs:
         with:
           java-version: '8'
           distribution: 'temurin'
-          cache: 'maven'
+
+      - name: Manually Install ProtocolLib (Bypasses Broken Maven Repositories)
+        run: |
+          wget https://github.com/dmulloy2/ProtocolLib/releases/download/4.8.0/ProtocolLib.jar -O ProtocolLib.jar
+          mvn install:install-file -Dfile=ProtocolLib.jar -DgroupId=com.comphenix.protocol -DartifactId=ProtocolLib -Dversion=4.8.0 -Dpackaging=jar
 
       - name: Build with Maven
         run: mvn clean package -B
