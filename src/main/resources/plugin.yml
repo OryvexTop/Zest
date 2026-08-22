@@ -3,7 +3,6 @@ version: 1.0.0
 main: com.zest.knockback.ZestPlugin
 author: Muvixo
 api-version: 1.8
-softdepend: [ProtocolLib]
 commands:
   zestreload:
     description: Reloads the knockback and hit config
