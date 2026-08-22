@@ -1,9 +1,9 @@
-name: HypixelHits
+name: MineStormRBW
 version: 1.0.0
-main: com.brugnevom.hypixelhits.HypixelHits.main
-author: brugnevom
+main: com.minestorm.rbw.MineStormRBW.main
+author: Muvixo
 api-version: 1.8
 depend: [ProtocolLib]
 commands:
   reloadhit:
-    description: Reloads the hypixel hit config
+    description: Reloads the MineStormRBW hit config

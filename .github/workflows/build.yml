@@ -32,7 +32,7 @@ jobs:
       - name: Upload JAR Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HypixelHits-1.0.0
+          name: MineStormRBW-1.0.0
           path: target/*.jar
           if-no-files-found: error
           retention-days: 7

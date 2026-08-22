@@ -7,12 +7,12 @@ PROJECT_FILES = {
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.brugnevom.hypixelhits</groupId>
-    <artifactId>HypixelHits</artifactId>
+    <groupId>com.minestorm.rbw</groupId>
+    <artifactId>MineStormRBW</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
-    <name>HypixelHits</name>
+    <name>MineStormRBW</name>
 
     <properties>
         <maven.compiler.source>1.8</maven.compiler.source>
@@ -86,19 +86,19 @@ PROJECT_FILES = {
 """,
 
     # 2. Plugin Manifest
-    "src/main/resources/plugin.yml": """name: HypixelHits
+    "src/main/resources/plugin.yml": """name: MineStormRBW
 version: 1.0.0
-main: com.brugnevom.hypixelhits.HypixelHits.main
-author: brugnevom
+main: com.minestorm.rbw.MineStormRBW.main
+author: Muvixo
 api-version: 1.8
 depend: [ProtocolLib]
 commands:
   reloadhit:
-    description: Reloads the hypixel hit config
+    description: Reloads the MineStormRBW hit config
 """,
 
     # 3. ExecuteHit.java
-    "src/main/java/com/brugnevom/hypixelhits/HypixelHits/ExecuteHit.java": """package com.brugnevom.hypixelhits.HypixelHits;
+    "src/main/java/com/minestorm/rbw/MineStormRBW/ExecuteHit.java": """package com.minestorm.rbw.MineStormRBW;
 
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -123,7 +123,7 @@ public class ExecuteHit implements CommandExecutor {
 """,
 
     # 4. runTick.java (Contains NMS and Logic exactly as provided)
-    "src/main/java/com/brugnevom/hypixelhits/HypixelHits/runTick.java": """package com.brugnevom.hypixelhits.HypixelHits;
+    "src/main/java/com/minestorm/rbw/MineStormRBW/runTick.java": """package com.minestorm.rbw.MineStormRBW;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -263,7 +263,7 @@ public class runTick implements Listener {
 """,
 
     # 5. main.java (Contains ProtocolLib hooks and task scheduling)
-    "src/main/java/com/brugnevom/hypixelhits/HypixelHits/main.java": """package com.brugnevom.hypixelhits.HypixelHits;
+    "src/main/java/com/minestorm/rbw/MineStormRBW/main.java": """package com.minestorm.rbw.MineStormRBW;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -321,7 +321,7 @@ public class main extends JavaPlugin {
     public static String delaymovedesc = "Movement Tick Delay (Delay every player's movement by this value): ";
     public static String consistantkbdesc = "Consistant KB (Combo KB feels more consistant, hit trading might be weird): ";
     
-    public static String folderPath = Paths.get("").toAbsolutePath().toString() + File.separator + "plugins" + File.separator + "HypixelHit" + File.separator;
+    public static String folderPath = Paths.get("").toAbsolutePath().toString() + File.separator + "plugins" + File.separator + "MineStormRBW" + File.separator;
     
     @Override
     public void onEnable() {
@@ -511,7 +511,7 @@ jobs:
       - name: Upload JAR Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HypixelHits-1.0.0
+          name: MineStormRBW-1.0.0
           path: target/*.jar
           if-no-files-found: error
           retention-days: 7
@@ -529,7 +529,7 @@ jobs:
 }
 
 def create_project():
-    print("[*] Generating Original HypixelHits project structure...")
+    print("[*] Generating MineStormRBW project structure...")
     for filepath, content in PROJECT_FILES.items():
         dir_name = os.path.dirname(filepath)
         if dir_name:
