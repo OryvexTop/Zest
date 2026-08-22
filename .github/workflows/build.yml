@@ -28,7 +28,7 @@ jobs:
       - name: Upload JAR Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ZestKnockback-1.0.0
+          name: HypixelHits-1.0.0
           path: target/*.jar
           if-no-files-found: error
           retention-days: 7

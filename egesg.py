@@ -1,18 +1,18 @@
 import os
 
 PROJECT_FILES = {
-    # 1. Clean Maven POM (No ProtocolLib, No Maven Build Errors)
+    # 1. Maven Configuration with NMS (CodeMC) & ProtocolLib (dmulloy2)
     "pom.xml": """<project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.zest.knockback</groupId>
-    <artifactId>ZestKnockback</artifactId>
+    <groupId>com.brugnevom.hypixelhits</groupId>
+    <artifactId>HypixelHits</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
-    <name>ZestKnockback</name>
+    <name>HypixelHits</name>
 
     <properties>
         <maven.compiler.source>1.8</maven.compiler.source>
@@ -21,17 +21,36 @@ PROJECT_FILES = {
     </properties>
 
     <repositories>
+        <!-- For standard Paper/Spigot API -->
         <repository>
             <id>papermc-repo</id>
             <url>https://repo.papermc.io/repository/maven-public/</url>
         </repository>
+        <!-- For NMS (net.minecraft.server.v1_8_R3) -->
+        <repository>
+            <id>codemc-nms</id>
+            <url>https://repo.codemc.io/repository/nms/</url>
+        </repository>
+        <!-- For ProtocolLib -->
+        <repository>
+            <id>dmulloy2-repo</id>
+            <url>https://repo.dmulloy2.net/repository/public/</url>
+        </repository>
     </repositories>
 
     <dependencies>
+        <!-- Spigot Server with NMS mappings -->
         <dependency>
-            <groupId>org.github.paperspigot</groupId>
-            <artifactId>paperspigot-api</artifactId>
+            <groupId>org.spigotmc</groupId>
+            <artifactId>spigot</artifactId>
             <version>1.8.8-R0.1-SNAPSHOT</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- ProtocolLib -->
+        <dependency>
+            <groupId>com.comphenix.protocol</groupId>
+            <artifactId>ProtocolLib</artifactId>
+            <version>4.8.0</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>
@@ -66,262 +85,398 @@ PROJECT_FILES = {
 </project>
 """,
 
-    # 2. Plugin Manifest (Clean)
-    "src/main/resources/plugin.yml": """name: ZestKnockback
+    # 2. Plugin Manifest
+    "src/main/resources/plugin.yml": """name: HypixelHit
 version: 1.0.0
-main: com.zest.knockback.ZestPlugin
-author: Muvixo
+main: com.brugnevom.hypixelhits.HypixelHits.main
+author: brugnevom
 api-version: 1.8
+depend: [ProtocolLib]
 commands:
-  zestreload:
-    description: Reloads the knockback and hit config
-    permission: zest.admin
-    aliases: [reloadhit]
+  reloadhit:
+    description: Reloads the hypixel hit config
 """,
 
-    # 3. Main Plugin Class (Hypixel Simulation Logic without ProtocolLib)
-    "src/main/java/com/zest/knockback/ZestPlugin.java": """package com.zest.knockback;
+    # 3. ExecuteHit.java
+    "src/main/java/com/brugnevom/hypixelhits/HypixelHits/ExecuteHit.java": """package com.brugnevom.hypixelhits.HypixelHits;
 
-import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.entity.Player;
-import org.bukkit.plugin.java.JavaPlugin;
-
-import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.Map;
-import java.util.UUID;
-
-public class ZestPlugin extends JavaPlugin {
-    public static ZestPlugin instance;
-    private final Map<UUID, LinkedList<Location>> historyMap = new HashMap<>();
-
-    public static int DELAY = 2;
-    public static boolean shouldCheckCPS = true;
-    public static boolean shouldThirdSprintHit = false;
-
-    public static final String HITDELAY_DESC = "hit delay (how much delay of hurt time before each hit): ";
-    public static final String DAMAGE_DESC = "damage multiplier (damage dealt multiplies by this value everytime a player combos): ";
-    public static final String CPS_LIMITING_DESC = "CPS limiting (enable checking whether the comboer is clicking too much): ";
-    public static final String CPS_LIMIT_DESC = "CPS limit (hypixel comobing won't work if the player is clicking beyond this value in a second): ";
-    public static final String THIRD_SPRINT_HIT_DESC = "Third Sprint Hit (Enable sprint hit for the third combo hit): ";
-    public static final String DELAY_MOVE_DESC = "Movement Tick Delay (Delay every player's movement by this value): ";
-    public static final String CONSISTANT_KB_DESC = "Consistant KB (Combo KB feels more consistant, hit trading might be weird): ";
-
-    public static String folderPath;
-
-    @Override
-    public void onEnable() {
-        instance = this;
-        folderPath = getDataFolder().getAbsolutePath() + File.separator;
-
-        readConfig();
-        getServer().getPluginManager().registerEvents(new ZestKnockbackListener(this), this);
-        getCommand("zestreload").setExecutor(new ExecuteHit());
-
-        // Sprint & Ground tracker loop
-        getServer().getScheduler().runTaskTimer(this, () -> {
-            if (ZestKnockbackListener.victim != null && ZestKnockbackListener.damager != null) {
-                if (ZestKnockbackListener.victim.isOnGround()) {
-                    ZestKnockbackListener.groundY = ZestKnockbackListener.victim.getLocation().getY();
-                    ZestKnockbackListener.hitCount = 0;
-                }
-
-                if (!shouldThirdSprintHit) {
-                    if (ZestKnockbackListener.victim.getLocation().getY() > ZestKnockbackListener.groundY + 0.4D) {
-                        ZestKnockbackListener.damager.setSprinting(false);
-                    } else {
-                        ZestKnockbackListener.damager.setSprinting(true);
-                    }
-                }
-            }
-        }, 0L, 1L);
-
-        // Position lag-compensation simulator (Logic only, no ProtocolLib needed)
-        Bukkit.getScheduler().runTaskTimer(this, () -> {
-            if (DELAY > 0) {
-                for (Player subject : Bukkit.getOnlinePlayers()) {
-                    UUID uuid = subject.getUniqueId();
-                    historyMap.putIfAbsent(uuid, new LinkedList<>());
-                    LinkedList<Location> history = historyMap.get(uuid);
-
-                    history.addLast(subject.getLocation().clone());
-                    if (!history.isEmpty() && history.size() > DELAY) {
-                        history.removeFirst();
-                    }
-                }
-            }
-        }, 0L, 1L);
-    }
-
-    public static void readConfig() {
-        File configFile = new File(folderPath + "config.txt");
-        if (!configFile.exists()) {
-            try {
-                Files.createDirectories(Paths.get(folderPath));
-                BufferedWriter bf = new BufferedWriter(new FileWriter(configFile));
-                bf.write("enabled: true"); bf.newLine();
-                bf.write(HITDELAY_DESC + "17"); bf.newLine();
-                bf.write(DAMAGE_DESC + "0.7"); bf.newLine();
-                bf.write(CPS_LIMITING_DESC + "true"); bf.newLine();
-                bf.write(CPS_LIMIT_DESC + "20"); bf.newLine();
-                bf.write(THIRD_SPRINT_HIT_DESC + "false"); bf.newLine();
-                bf.write(DELAY_MOVE_DESC + "2"); bf.newLine();
-                bf.write(CONSISTANT_KB_DESC + "true"); bf.newLine();
-                bf.close();
-            } catch (IOException ignored) {
-            }
-        }
-
-        try (BufferedReader bfr = new BufferedReader(new FileReader(configFile))) {
-            ZestKnockbackListener.customHit = Boolean.parseBoolean(bfr.readLine().replace("enabled: ", ""));
-            ZestKnockbackListener.maxDmTick = Integer.parseInt(bfr.readLine().replace(HITDELAY_DESC, ""));
-            ZestKnockbackListener.damageMult = Double.parseDouble(bfr.readLine().replace(DAMAGE_DESC, ""));
-            shouldCheckCPS = Boolean.parseBoolean(bfr.readLine().replace(CPS_LIMITING_DESC, ""));
-            ZestKnockbackListener.cpsLimit = Double.parseDouble(bfr.readLine().replace(CPS_LIMIT_DESC, ""));
-            shouldThirdSprintHit = Boolean.parseBoolean(bfr.readLine().replace(THIRD_SPRINT_HIT_DESC, ""));
-            DELAY = Integer.parseInt(bfr.readLine().replace(DELAY_MOVE_DESC, ""));
-            ZestKnockbackListener.consistantKB = Boolean.parseBoolean(bfr.readLine().replace(CONSISTANT_KB_DESC, ""));
-        } catch (Exception ignored) {
-        }
-    }
-}
-""",
-
-    # 4. Listener Class (CPS Tracker & Consistent Y Knockback)
-    "src/main/java/com/zest/knockback/ZestKnockbackListener.java": """package com.zest.knockback;
-
-import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
-import org.bukkit.event.entity.EntityDamageByEntityEvent;
-import org.bukkit.event.player.PlayerAnimationEvent;
-import org.bukkit.event.player.PlayerAnimationType;
-import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.util.Vector;
-
-import java.util.*;
-
-public class ZestKnockbackListener implements Listener {
-
-    private final ZestPlugin plugin;
-    public static double cpsLimit = 20.0D;
-    private final Map<UUID, List<Long>> playerClicks = new HashMap<>();
-
-    public static boolean customHit = true;
-    public static boolean consistantKB = true;
-    public static int maxDmTick = 17;
-    public static double damageMult = 0.7D;
-    public static double groundY;
-    public static int hitCount = 0;
-
-    public static Player victim;
-    public static Player damager;
-
-    public ZestKnockbackListener(ZestPlugin plugin) {
-        this.plugin = plugin;
-    }
-
-    private void recordClick(UUID uuid) {
-        playerClicks.putIfAbsent(uuid, new ArrayList<>());
-        playerClicks.get(uuid).add(System.currentTimeMillis());
-    }
-
-    private int getCPS(UUID uuid) {
-        if (!playerClicks.containsKey(uuid)) return 0;
-        long now = System.currentTimeMillis();
-        List<Long> clicks = playerClicks.get(uuid);
-        clicks.removeIf(timestamp -> (now - timestamp > 1000L));
-        return clicks.size();
-    }
-
-    @EventHandler
-    public void onQuit(PlayerQuitEvent event) {
-        playerClicks.remove(event.getPlayer().getUniqueId());
-    }
-
-    @EventHandler
-    public void onSwing(PlayerAnimationEvent e) {
-        if (e.getAnimationType().equals(PlayerAnimationType.ARM_SWING)) {
-            recordClick(e.getPlayer().getUniqueId());
-        }
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onHit(EntityDamageByEntityEvent event) {
-        if (event.getEntity() instanceof Player && event.getDamager() instanceof Player) {
-            victim = (Player) event.getEntity();
-            damager = (Player) event.getDamager();
-            UUID damagerUUID = damager.getUniqueId();
-
-            if (ZestPlugin.shouldCheckCPS) {
-                int currentCPS = getCPS(damagerUUID);
-                if (currentCPS > cpsLimit) {
-                    event.setCancelled(true);
-                    playerClicks.remove(damagerUUID);
-                    return;
-                }
-            }
-
-            if (customHit) {
-                if (victim.isOnGround()) {
-                    hitCount = 0;
-                } else {
-                    hitCount++;
-                }
-
-                if (hitCount >= 4) {
-                    hitCount = 0;
-                }
-
-                event.setDamage(event.getDamage() * damageMult);
-                victim.setMaximumNoDamageTicks(maxDmTick);
-
-                if (consistantKB && hitCount >= 1 && !victim.isOnGround()) {
-                    if (damager.getLocation().distance(victim.getLocation()) > 2.5D) {
-                        Vector kb = new Vector(0, 0, 0);
-                        if (hitCount == 1) kb.setY(-0.3D);
-                        if (hitCount == 2) kb.setY(-0.7D);
-                        victim.setVelocity(kb);
-                    }
-                }
-            } else {
-                victim.setMaximumNoDamageTicks(20);
-            }
-        }
-    }
-}
-""",
-
-    # 5. Reload Command Executor
-    "src/main/java/com/zest/knockback/ExecuteHit.java": """package com.zest.knockback;
-
-import net.md_5.bungee.api.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
+import net.md_5.bungee.api.ChatColor;
+
 public class ExecuteHit implements CommandExecutor {
 
     @Override
-    public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-        ZestPlugin.readConfig();
-        if (sender instanceof Player) {
-            sender.sendMessage(ChatColor.GREEN + "[ZestKnockback] Config reloaded successfully!");
-        } else {
-            sender.sendMessage("[ZestKnockback] Config reloaded successfully!");
+    public boolean onCommand(CommandSender arg0, Command arg1, String arg2, String[] arg3) {
+        main.read();
+        if(arg0 instanceof Player) {
+            Player player = (Player) arg0;
+            player.sendMessage(ChatColor.GREEN + "Reloaded hit!");
         }
-        return true;
+        return false;
     }
+
 }
 """,
 
-    # 6. GitHub Actions Workflow (Tested and Guaranteed to Pass)
+    # 4. runTick.java (Contains NMS and Logic exactly as provided)
+    "src/main/java/com/brugnevom/hypixelhits/HypixelHits/runTick.java": """package com.brugnevom.hypixelhits.HypixelHits;
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.UUID;
+
+import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
+import org.bukkit.Material;
+import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.block.Chest;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
+import org.bukkit.entity.Fireball;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.ProjectileHitEvent;
+import org.bukkit.event.player.PlayerAnimationEvent;
+import org.bukkit.event.player.PlayerAnimationType;
+import org.bukkit.event.player.PlayerInteractAtEntityEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.material.EnderChest;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.util.Vector;
+
+import com.comphenix.protocol.ProtocolLibrary;
+
+import net.md_5.bungee.api.ChatColor;
+
+public class runTick implements Listener {
+    public static double cpslimit = 16;
+    private final Map<UUID, List<Long>> playerClicks = new HashMap<>();
+    
+    public static boolean customhit = true, consistantkb;
+    public static int intmaxdmtick;
+    public static double damage, groundy;
+    public static int hitcount;
+    
+    public static Player victim;
+    public static Player damager;
+    public static net.minecraft.server.v1_8_R3.EntityPlayer nmsPlayer;
+    public static net.minecraft.server.v1_8_R3.EntityPlayer nmsdPlayer;
+    
+    Map<UUID, Integer> hitCount = new HashMap<>();
+    
+    public static int hitcombo;
+    public main m;
+    
+    public runTick(main m) {
+        this.m = m;
+    }
+    private void recordClick(UUID uuid) {
+        playerClicks.putIfAbsent(uuid, new ArrayList<>());
+        playerClicks.get(uuid).add(System.currentTimeMillis());
+    }
+    private int getCPS(UUID uuid) {
+        if (!playerClicks.containsKey(uuid)) return 0;
+        
+        long now = System.currentTimeMillis();
+        List<Long> clicks = playerClicks.get(uuid);
+        clicks.removeIf(timestamp -> now - timestamp > 1000);
+        
+        return clicks.size();
+    }
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        playerClicks.remove(event.getPlayer().getUniqueId());
+    }
+    @EventHandler
+    public void interact(PlayerAnimationEvent e) {
+        if(e.getAnimationType().equals(PlayerAnimationType.ARM_SWING)) {
+            UUID uuid = e.getPlayer().getUniqueId();
+            recordClick(uuid);
+        }
+    }
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onHit(EntityDamageByEntityEvent event) {
+        if (event.getEntity() instanceof Player && event.getDamager() instanceof Player) {
+            victim = (Player) event.getEntity();
+            damager = (Player) event.getDamager();
+            nmsPlayer = ((org.bukkit.craftbukkit.v1_8_R3.entity.CraftPlayer) damager).getHandle();
+            nmsdPlayer = ((org.bukkit.craftbukkit.v1_8_R3.entity.CraftPlayer) victim).getHandle();
+            UUID damagerUUID = damager.getUniqueId();
+            
+            int currentCPS = getCPS(damagerUUID);
+            if (currentCPS > cpslimit) {
+                event.setCancelled(true);
+                playerClicks.remove(damagerUUID);
+                return;
+            }
+            
+            if(customhit) {
+                if(victim.isOnGround()) hitcount = 0;
+                else hitcount++;
+                if(hitcount >= 4) hitcount = 0;
+                
+                event.setDamage(event.getDamage() * damage);
+                victim.setMaximumNoDamageTicks(intmaxdmtick);
+                
+                if(consistantkb) {
+                    if(hitcount >= 1 && !victim.isOnGround()) {
+                        if(damager.getLocation().distance(victim.getLocation()) > 2.5) {
+                            if(nmsdPlayer.hurtTicks > 0) {
+                                Vector kb = new Vector(0, 0, 0);
+                                if(hitcount == 1) kb.setY(-0.3);
+                                if(hitcount == 2) kb.setY(-0.7);
+                                victim.setVelocity(kb);
+                            }
+                        }
+                    }
+                }
+            } else {
+                victim.setMaximumNoDamageTicks(20);
+                event.setDamage(event.getDamage());
+            }
+        }
+    }
+
+}
+""",
+
+    # 5. main.java (Contains ProtocolLib hooks and task scheduling)
+    "src/main/java/com/brugnevom/hypixelhits/HypixelHits/main.java": """package com.brugnevom.hypixelhits.HypixelHits;
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.Map;
+import java.util.Random;
+import java.util.UUID;
+
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.craftbukkit.v1_8_R3.entity.CraftPlayer;
+import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.util.Vector;
+
+import com.comphenix.protocol.PacketType;
+import com.comphenix.protocol.ProtocolLibrary;
+import com.comphenix.protocol.ProtocolManager;
+import com.comphenix.protocol.events.ListenerPriority;
+import com.comphenix.protocol.events.PacketAdapter;
+import com.comphenix.protocol.events.PacketContainer;
+import com.comphenix.protocol.events.PacketEvent;
+
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelDuplexHandler;
+import io.netty.channel.ChannelHandlerContext;
+import net.minecraft.server.v1_8_R3.EntityPlayer;
+
+public class main extends JavaPlugin {
+    public static Plugin thisplugin;
+    
+    private final Map<UUID, LinkedList<Location>> historyMap = new HashMap<>();
+    private static int DELAY;
+    
+    public static boolean shouldCheckCPS = true, shouldThirdSprintHit;
+    
+    public static String hitdelaydesc = "hit delay (how much delay of hurt time before each hit): ";
+    public static String damagedesc = "damage multiplier (damage dealt multiplies by this value everytime a player combos): ";
+    public static String cpslimitingdesc = "CPS limiting (enable checking whether the comboer is clicking too much): ";
+    public static String cpslimitdesc = "CPS limit (hypixel comobing won't work if the player is clicking beyond this value in a second): ";
+    public static String thirdsprinthitdesc = "Third Sprint Hit (Enable sprint hit for the third combo hit): ";
+    public static String delaymovedesc = "Movement Tick Delay (Delay every player's movement by this value): ";
+    public static String consistantkbdesc = "Consistant KB (Combo KB feels more consistant, hit trading might be weird): ";
+    
+    public static String folderPath = Paths.get("").toAbsolutePath().toString() + File.separator + "plugins" + File.separator + "HypixelHit" + File.separator;
+    
+    @Override
+    public void onEnable() {
+        getServer().getPluginManager().registerEvents(new runTick(this), this);
+        getCommand("reloadhit").setExecutor(new ExecuteHit());
+        read();
+        thisplugin = this;
+        
+        getServer().getScheduler().runTaskTimer(this, new Runnable() {
+            
+            @Override
+            public void run() {
+                if(runTick.damager != null && runTick.victim != null) {
+                    if(runTick.victim.isOnGround()) {
+                        runTick.groundy = runTick.victim.getLocation().getY();
+                        runTick.hitcount = 0;
+                    }
+                    
+                    if(!shouldThirdSprintHit) {
+                        if(runTick.victim != null && runTick.damager != null && runTick.nmsPlayer != null && runTick.nmsdPlayer != null) {
+                            if(runTick.victim.getLocation().getY() > runTick.groundy + 0.4) {
+                                runTick.damager.setSprinting(false);
+                            } else runTick.damager.setSprinting(true);
+                        }
+                    }
+                }
+                
+            }
+            
+        }, 0, 0);
+        
+        Bukkit.getScheduler().runTaskTimer(this, () -> {
+            if(DELAY > 0) {
+                for (Player subject : Bukkit.getOnlinePlayers()) {
+                    UUID uuid = subject.getUniqueId();
+                    historyMap.putIfAbsent(uuid, new LinkedList<>());
+                    LinkedList<Location> history = historyMap.get(uuid);
+    
+                    history.addLast(subject.getLocation().clone());
+                    if (!history.isEmpty()) {
+                        Location delayedLoc = (history.size() > DELAY) ? history.removeFirst() : history.getFirst();
+                        broadcastDelayedPosition(subject, delayedLoc);
+                    }
+                }
+            }
+        }, 0L, 1L);
+
+        ProtocolLibrary.getProtocolManager().addPacketListener(new PacketAdapter(this,
+                ListenerPriority.HIGHEST,
+                PacketType.Play.Server.ENTITY_TELEPORT,
+                PacketType.Play.Server.REL_ENTITY_MOVE,
+                PacketType.Play.Server.REL_ENTITY_MOVE_LOOK,
+                PacketType.Play.Server.ENTITY_LOOK,
+                PacketType.Play.Server.ENTITY_HEAD_ROTATION) {
+
+            @Override
+            public void onPacketSending(PacketEvent event) {
+                if(DELAY > 0) {
+                    PacketContainer packet = event.getPacket();
+                    int entityId = packet.getIntegers().read(0);
+                    
+                    Player subject = null;
+                    for (Player p : Bukkit.getOnlinePlayers()) {
+                        if (p.getEntityId() == entityId) {
+                            subject = p;
+                            break;
+                        }
+                    }
+    
+                    if (subject != null) {
+                        if (event.getPlayer().getUniqueId().equals(subject.getUniqueId())) return;
+                        
+                        event.setCancelled(true);
+                    }
+                }
+            }
+        });
+    }
+    
+    private void broadcastDelayedPosition(Player subject, Location loc) {
+        PacketContainer teleport = new PacketContainer(PacketType.Play.Server.ENTITY_TELEPORT);
+        teleport.getIntegers().write(0, subject.getEntityId());
+        teleport.getIntegers().write(1, (int) Math.floor(loc.getX() * 32.0D));
+        teleport.getIntegers().write(2, (int) Math.floor(loc.getY() * 32.0D));
+        teleport.getIntegers().write(3, (int) Math.floor(loc.getZ() * 32.0D));
+        teleport.getBytes().write(0, (byte) (loc.getYaw() * 256.0F / 360.0F));
+        teleport.getBytes().write(1, (byte) (loc.getPitch() * 256.0F / 360.0F));
+        teleport.getBooleans().write(0, true);
+
+        PacketContainer headLook = new PacketContainer(PacketType.Play.Server.ENTITY_HEAD_ROTATION);
+        headLook.getIntegers().write(0, subject.getEntityId());
+        headLook.getBytes().write(0, (byte) (loc.getYaw() * 256.0F / 360.0F));
+
+        for (Player observer : Bukkit.getOnlinePlayers()) {
+            if (observer.getUniqueId().equals(subject.getUniqueId())) continue;
+
+            try {
+                ProtocolLibrary.getProtocolManager().sendServerPacket(observer, teleport, false);
+                ProtocolLibrary.getProtocolManager().sendServerPacket(observer, headLook, false);
+            } catch (Exception e) {
+            }
+        }
+    }
+    private Player getPlayerByEntityId(int id) {
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            if (p.getEntityId() == id) return p;
+        }
+        return null;
+    }
+
+    public static void read() {
+        try {
+            BufferedReader bfr = new BufferedReader(new FileReader(folderPath + "config.txt"));
+            
+            try {
+                runTick.customhit = Boolean.parseBoolean(bfr.readLine().replace("enabled: ", ""));
+                runTick.intmaxdmtick = Integer.parseInt(bfr.readLine().replace(hitdelaydesc, ""));
+                runTick.damage = Double.parseDouble(bfr.readLine().replace(damagedesc, ""));
+                shouldCheckCPS = Boolean.parseBoolean(bfr.readLine().replace(cpslimitingdesc, ""));
+                runTick.cpslimit = Double.parseDouble(bfr.readLine().replace(cpslimitdesc, ""));
+                shouldThirdSprintHit = Boolean.parseBoolean(bfr.readLine().replace(thirdsprinthitdesc, ""));
+                DELAY = Integer.parseInt(bfr.readLine().replace(delaymovedesc, ""));
+                runTick.consistantkb = Boolean.parseBoolean(bfr.readLine().replace(consistantkbdesc, ""));
+                
+                bfr.close();
+            } catch (IOException e) {
+            }
+        } catch (FileNotFoundException e) {
+            try {
+                Files.createDirectories(Paths.get(folderPath));
+                
+                try {
+                    BufferedWriter bf = new BufferedWriter(new FileWriter(folderPath + "config.txt"));
+                    
+                    bf.write("enabled: " + true); bf.newLine();
+                    bf.write(hitdelaydesc + 17); bf.newLine();
+                    bf.write(damagedesc + 0.7); bf.newLine();
+                    bf.write(cpslimitingdesc + true); bf.newLine();
+                    bf.write(cpslimitdesc + 20); bf.newLine();
+                    bf.write(thirdsprinthitdesc + false); bf.newLine();
+                    bf.write(delaymovedesc + 2); bf.newLine();
+                    bf.write(consistantkbdesc + true); bf.newLine();
+                    
+                    bf.close();
+                } catch (IOException e1) {
+                }
+            } catch (IOException e1) {
+            }
+        }
+    }
+
+}
+""",
+
+    # 6. GitHub Actions Build File
     ".github/workflows/build.yml": """name: Build & Release Plugin
 
 on:
@@ -352,13 +507,13 @@ jobs:
       - name: Upload JAR Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ZestKnockback-1.0.0
+          name: HypixelHits-1.0.0
           path: target/*.jar
           if-no-files-found: error
           retention-days: 7
 """,
 
-    # 7. Git Ignore
+    # 7. .gitignore
     ".gitignore": """target/
 *.jar
 .idea/
@@ -370,7 +525,7 @@ jobs:
 }
 
 def create_project():
-    print("[*] Generating Flawless ZestKnockback project structure...")
+    print("[*] Generating Original HypixelHits project structure...")
     for filepath, content in PROJECT_FILES.items():
         dir_name = os.path.dirname(filepath)
         if dir_name:
@@ -380,7 +535,7 @@ def create_project():
             f.write(content)
         print(f" [+] Created: {filepath}")
 
-    print("\n[✔] Project generated successfully!")
+    print("\\n[✔] Project generated successfully!")
     print("Run 'python pusher.py' to commit and push changes to GitHub.")
 
 if __name__ == "__main__":

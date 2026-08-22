@@ -1,10 +1,9 @@
-name: ZestKnockback
+name: HypixelHit
 version: 1.0.0
-main: com.zest.knockback.ZestPlugin
-author: Muvixo
+main: com.brugnevom.hypixelhits.HypixelHits.main
+author: brugnevom
 api-version: 1.8
+depend: [ProtocolLib]
 commands:
-  zestreload:
-    description: Reloads the knockback and hit config
-    permission: zest.admin
-    aliases: [reloadhit]
+  reloadhit:
+    description: Reloads the hypixel hit config
