@@ -1,14 +1,5 @@
 package com.minestorm.rbw.MineStormRBW;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
@@ -17,7 +8,6 @@ import java.util.UUID;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import com.comphenix.protocol.PacketType;
@@ -28,29 +18,22 @@ import com.comphenix.protocol.events.PacketContainer;
 import com.comphenix.protocol.events.PacketEvent;
 
 public class main extends JavaPlugin {
-    public static Plugin thisplugin;
+    public static main instance;
     
     private final Map<UUID, LinkedList<Location>> historyMap = new HashMap<>();
-    private static int DELAY;
-    
-    public static boolean shouldCheckCPS = true, shouldThirdSprintHit;
-    
-    public static String hitdelaydesc = "hit delay (how much delay of hurt time before each hit): ";
-    public static String damagedesc = "damage multiplier (damage dealt multiplies by this value everytime a player combos): ";
-    public static String cpslimitingdesc = "CPS limiting (enable checking whether the comboer is clicking too much): ";
-    public static String cpslimitdesc = "CPS limit (hypixel comobing won't work if the player is clicking beyond this value in a second): ";
-    public static String thirdsprinthitdesc = "Third Sprint Hit (Enable sprint hit for the third combo hit): ";
-    public static String delaymovedesc = "Movement Tick Delay (Delay every player's movement by this value): ";
-    public static String consistantkbdesc = "Consistant KB (Combo KB feels more consistant, hit trading might be weird): ";
-    
-    public static String folderPath = Paths.get("").toAbsolutePath().toString() + File.separator + "plugins" + File.separator + "MineStormRBW" + File.separator;
+    public static int DELAY;
+    public static boolean shouldCheckCPS, shouldThirdSprintHit;
     
     @Override
     public void onEnable() {
+        instance = this;
+        
+        // Setup Native standard config.yml
+        saveDefaultConfig();
+        loadConfigValues();
+        
         getServer().getPluginManager().registerEvents(new runTick(this), this);
         getCommand("reloadhit").setExecutor(new ExecuteHit());
-        read();
-        thisplugin = this;
         
         getServer().getScheduler().runTaskTimer(this, new Runnable() {
             @Override
@@ -87,33 +70,47 @@ public class main extends JavaPlugin {
             }
         }, 0L, 1L);
 
-        ProtocolLibrary.getProtocolManager().addPacketListener(new PacketAdapter(this,
-                ListenerPriority.HIGHEST,
-                PacketType.Play.Server.ENTITY_TELEPORT,
-                PacketType.Play.Server.REL_ENTITY_MOVE,
-                PacketType.Play.Server.REL_ENTITY_MOVE_LOOK,
-                PacketType.Play.Server.ENTITY_LOOK,
-                PacketType.Play.Server.ENTITY_HEAD_ROTATION) {
+        if (getServer().getPluginManager().getPlugin("ProtocolLib") != null) {
+            ProtocolLibrary.getProtocolManager().addPacketListener(new PacketAdapter(this,
+                    ListenerPriority.HIGHEST,
+                    PacketType.Play.Server.ENTITY_TELEPORT,
+                    PacketType.Play.Server.REL_ENTITY_MOVE,
+                    PacketType.Play.Server.REL_ENTITY_MOVE_LOOK,
+                    PacketType.Play.Server.ENTITY_LOOK,
+                    PacketType.Play.Server.ENTITY_HEAD_ROTATION) {
 
-            @Override
-            public void onPacketSending(PacketEvent event) {
-                if(DELAY > 0) {
-                    PacketContainer packet = event.getPacket();
-                    int entityId = packet.getIntegers().read(0);
-                    Player subject = null;
-                    for (Player p : Bukkit.getOnlinePlayers()) {
-                        if (p.getEntityId() == entityId) {
-                            subject = p;
-                            break;
+                @Override
+                public void onPacketSending(PacketEvent event) {
+                    if(DELAY > 0) {
+                        PacketContainer packet = event.getPacket();
+                        int entityId = packet.getIntegers().read(0);
+                        Player subject = null;
+                        for (Player p : Bukkit.getOnlinePlayers()) {
+                            if (p.getEntityId() == entityId) {
+                                subject = p;
+                                break;
+                            }
+                        }
+                        if (subject != null) {
+                            if (event.getPlayer().getUniqueId().equals(subject.getUniqueId())) return;
+                            event.setCancelled(true);
                         }
                     }
-                    if (subject != null) {
-                        if (event.getPlayer().getUniqueId().equals(subject.getUniqueId())) return;
-                        event.setCancelled(true);
-                    }
                 }
-            }
-        });
+            });
+        }
+    }
+    
+    public void loadConfigValues() {
+        reloadConfig();
+        runTick.customhit = getConfig().getBoolean("enabled", true);
+        runTick.intmaxdmtick = getConfig().getInt("hit-delay", 17);
+        runTick.damage = getConfig().getDouble("damage-multiplier", 0.7);
+        shouldCheckCPS = getConfig().getBoolean("cps-limiting.enabled", true);
+        runTick.cpslimit = getConfig().getDouble("cps-limiting.limit", 20.0);
+        shouldThirdSprintHit = getConfig().getBoolean("third-sprint-hit", false);
+        DELAY = getConfig().getInt("movement-tick-delay", 2);
+        runTick.consistantkb = getConfig().getBoolean("consistent-kb", true);
     }
     
     private void broadcastDelayedPosition(Player subject, Location loc) {
@@ -136,39 +133,6 @@ public class main extends JavaPlugin {
                 ProtocolLibrary.getProtocolManager().sendServerPacket(observer, teleport, false);
                 ProtocolLibrary.getProtocolManager().sendServerPacket(observer, headLook, false);
             } catch (Exception e) {}
-        }
-    }
-
-    public static void read() {
-        try {
-            BufferedReader bfr = new BufferedReader(new FileReader(folderPath + "config.txt"));
-            try {
-                runTick.customhit = Boolean.parseBoolean(bfr.readLine().replace("enabled: ", ""));
-                runTick.intmaxdmtick = Integer.parseInt(bfr.readLine().replace(hitdelaydesc, ""));
-                runTick.damage = Double.parseDouble(bfr.readLine().replace(damagedesc, ""));
-                shouldCheckCPS = Boolean.parseBoolean(bfr.readLine().replace(cpslimitingdesc, ""));
-                runTick.cpslimit = Double.parseDouble(bfr.readLine().replace(cpslimitdesc, ""));
-                shouldThirdSprintHit = Boolean.parseBoolean(bfr.readLine().replace(thirdsprinthitdesc, ""));
-                DELAY = Integer.parseInt(bfr.readLine().replace(delaymovedesc, ""));
-                runTick.consistantkb = Boolean.parseBoolean(bfr.readLine().replace(consistantkbdesc, ""));
-                bfr.close();
-            } catch (IOException e) {}
-        } catch (FileNotFoundException e) {
-            try {
-                Files.createDirectories(Paths.get(folderPath));
-                try {
-                    BufferedWriter bf = new BufferedWriter(new FileWriter(folderPath + "config.txt"));
-                    bf.write("enabled: true"); bf.newLine();
-                    bf.write(hitdelaydesc + "17"); bf.newLine();
-                    bf.write(damagedesc + "0.7"); bf.newLine();
-                    bf.write(cpslimitingdesc + "true"); bf.newLine();
-                    bf.write(cpslimitdesc + "20"); bf.newLine();
-                    bf.write(thirdsprinthitdesc + "false"); bf.newLine();
-                    bf.write(delaymovedesc + "2"); bf.newLine();
-                    bf.write(consistantkbdesc + "true"); bf.newLine();
-                    bf.close();
-                } catch (IOException e1) {}
-            } catch (IOException e1) {}
         }
     }
 }

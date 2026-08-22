@@ -85,10 +85,23 @@ api-version: 1.8
 depend: [ProtocolLib]
 commands:
   reloadhit:
-    description: Reloads the MineStormRBW config
+    description: Reloads the MineStormRBW config.yml
 """,
 
-    # 3. ExecuteHit.java
+    # 3. Default config.yml (Clean, Standard YAML)
+    "src/main/resources/config.yml": """# MineStormRBW Config
+enabled: true
+hit-delay: 17
+damage-multiplier: 0.7
+cps-limiting:
+  enabled: true
+  limit: 20.0
+third-sprint-hit: false
+movement-tick-delay: 2
+consistent-kb: true
+""",
+
+    # 4. ExecuteHit.java
     "src/main/java/com/minestorm/rbw/MineStormRBW/ExecuteHit.java": """package com.minestorm.rbw.MineStormRBW;
 
 import org.bukkit.command.Command;
@@ -100,17 +113,14 @@ import net.md_5.bungee.api.ChatColor;
 public class ExecuteHit implements CommandExecutor {
     @Override
     public boolean onCommand(CommandSender arg0, Command arg1, String arg2, String[] arg3) {
-        main.read();
-        if(arg0 instanceof Player) {
-            Player player = (Player) arg0;
-            player.sendMessage(ChatColor.GREEN + "Reloaded hit!");
-        }
-        return false;
+        main.instance.loadConfigValues();
+        arg0.sendMessage(ChatColor.GREEN + "[MineStormRBW] config.yml reloaded successfully!");
+        return true;
     }
 }
 """,
 
-    # 4. runTick.java (FIXED DELAY & FIXED KB BUG)
+    # 5. runTick.java (FIXED DELAY & FIXED KB BUG)
     "src/main/java/com/minestorm/rbw/MineStormRBW/runTick.java": """package com.minestorm.rbw.MineStormRBW;
 
 import java.util.ArrayList;
@@ -130,12 +140,12 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.util.Vector;
 
 public class runTick implements Listener {
-    public static double cpslimit = 16;
+    public static double cpslimit = 16.0;
     private final Map<UUID, List<Long>> playerClicks = new HashMap<>();
     
-    public static boolean customhit = true, consistantkb;
-    public static int intmaxdmtick;
-    public static double damage, groundy;
+    public static boolean customhit = true, consistantkb = true;
+    public static int intmaxdmtick = 17;
+    public static double damage = 0.7, groundy;
     public static int hitcount;
     
     public static Player victim;
@@ -146,10 +156,12 @@ public class runTick implements Listener {
     public runTick(main m) {
         this.m = m;
     }
+    
     private void recordClick(UUID uuid) {
         playerClicks.putIfAbsent(uuid, new ArrayList<>());
         playerClicks.get(uuid).add(System.currentTimeMillis());
     }
+    
     private int getCPS(UUID uuid) {
         if (!playerClicks.containsKey(uuid)) return 0;
         long now = System.currentTimeMillis();
@@ -157,10 +169,12 @@ public class runTick implements Listener {
         clicks.removeIf(timestamp -> now - timestamp > 1000);
         return clicks.size();
     }
+    
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         playerClicks.remove(event.getPlayer().getUniqueId());
     }
+    
     @EventHandler
     public void interact(PlayerAnimationEvent e) {
         if(e.getAnimationType().equals(PlayerAnimationType.ARM_SWING)) {
@@ -180,11 +194,13 @@ public class runTick implements Listener {
                 return;
             }
             
-            int currentCPS = getCPS(damagerUUID);
-            if (currentCPS > cpslimit) {
-                event.setCancelled(true);
-                playerClicks.remove(damagerUUID);
-                return;
+            if (main.shouldCheckCPS) {
+                int currentCPS = getCPS(damagerUUID);
+                if (currentCPS > cpslimit) {
+                    event.setCancelled(true);
+                    playerClicks.remove(damagerUUID);
+                    return;
+                }
             }
             
             if(customhit) {
@@ -227,18 +243,9 @@ public class runTick implements Listener {
 }
 """,
 
-    # 5. main.java
+    # 6. main.java (Native YAML Integration & Spigot API)
     "src/main/java/com/minestorm/rbw/MineStormRBW/main.java": """package com.minestorm.rbw.MineStormRBW;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
@@ -247,7 +254,6 @@ import java.util.UUID;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import com.comphenix.protocol.PacketType;
@@ -258,29 +264,22 @@ import com.comphenix.protocol.events.PacketContainer;
 import com.comphenix.protocol.events.PacketEvent;
 
 public class main extends JavaPlugin {
-    public static Plugin thisplugin;
+    public static main instance;
     
     private final Map<UUID, LinkedList<Location>> historyMap = new HashMap<>();
-    private static int DELAY;
-    
-    public static boolean shouldCheckCPS = true, shouldThirdSprintHit;
-    
-    public static String hitdelaydesc = "hit delay (how much delay of hurt time before each hit): ";
-    public static String damagedesc = "damage multiplier (damage dealt multiplies by this value everytime a player combos): ";
-    public static String cpslimitingdesc = "CPS limiting (enable checking whether the comboer is clicking too much): ";
-    public static String cpslimitdesc = "CPS limit (hypixel comobing won't work if the player is clicking beyond this value in a second): ";
-    public static String thirdsprinthitdesc = "Third Sprint Hit (Enable sprint hit for the third combo hit): ";
-    public static String delaymovedesc = "Movement Tick Delay (Delay every player's movement by this value): ";
-    public static String consistantkbdesc = "Consistant KB (Combo KB feels more consistant, hit trading might be weird): ";
-    
-    public static String folderPath = Paths.get("").toAbsolutePath().toString() + File.separator + "plugins" + File.separator + "MineStormRBW" + File.separator;
+    public static int DELAY;
+    public static boolean shouldCheckCPS, shouldThirdSprintHit;
     
     @Override
     public void onEnable() {
+        instance = this;
+        
+        // Setup Native standard config.yml
+        saveDefaultConfig();
+        loadConfigValues();
+        
         getServer().getPluginManager().registerEvents(new runTick(this), this);
         getCommand("reloadhit").setExecutor(new ExecuteHit());
-        read();
-        thisplugin = this;
         
         getServer().getScheduler().runTaskTimer(this, new Runnable() {
             @Override
@@ -317,33 +316,47 @@ public class main extends JavaPlugin {
             }
         }, 0L, 1L);
 
-        ProtocolLibrary.getProtocolManager().addPacketListener(new PacketAdapter(this,
-                ListenerPriority.HIGHEST,
-                PacketType.Play.Server.ENTITY_TELEPORT,
-                PacketType.Play.Server.REL_ENTITY_MOVE,
-                PacketType.Play.Server.REL_ENTITY_MOVE_LOOK,
-                PacketType.Play.Server.ENTITY_LOOK,
-                PacketType.Play.Server.ENTITY_HEAD_ROTATION) {
+        if (getServer().getPluginManager().getPlugin("ProtocolLib") != null) {
+            ProtocolLibrary.getProtocolManager().addPacketListener(new PacketAdapter(this,
+                    ListenerPriority.HIGHEST,
+                    PacketType.Play.Server.ENTITY_TELEPORT,
+                    PacketType.Play.Server.REL_ENTITY_MOVE,
+                    PacketType.Play.Server.REL_ENTITY_MOVE_LOOK,
+                    PacketType.Play.Server.ENTITY_LOOK,
+                    PacketType.Play.Server.ENTITY_HEAD_ROTATION) {
 
-            @Override
-            public void onPacketSending(PacketEvent event) {
-                if(DELAY > 0) {
-                    PacketContainer packet = event.getPacket();
-                    int entityId = packet.getIntegers().read(0);
-                    Player subject = null;
-                    for (Player p : Bukkit.getOnlinePlayers()) {
-                        if (p.getEntityId() == entityId) {
-                            subject = p;
-                            break;
+                @Override
+                public void onPacketSending(PacketEvent event) {
+                    if(DELAY > 0) {
+                        PacketContainer packet = event.getPacket();
+                        int entityId = packet.getIntegers().read(0);
+                        Player subject = null;
+                        for (Player p : Bukkit.getOnlinePlayers()) {
+                            if (p.getEntityId() == entityId) {
+                                subject = p;
+                                break;
+                            }
+                        }
+                        if (subject != null) {
+                            if (event.getPlayer().getUniqueId().equals(subject.getUniqueId())) return;
+                            event.setCancelled(true);
                         }
                     }
-                    if (subject != null) {
-                        if (event.getPlayer().getUniqueId().equals(subject.getUniqueId())) return;
-                        event.setCancelled(true);
-                    }
                 }
-            }
-        });
+            });
+        }
+    }
+    
+    public void loadConfigValues() {
+        reloadConfig();
+        runTick.customhit = getConfig().getBoolean("enabled", true);
+        runTick.intmaxdmtick = getConfig().getInt("hit-delay", 17);
+        runTick.damage = getConfig().getDouble("damage-multiplier", 0.7);
+        shouldCheckCPS = getConfig().getBoolean("cps-limiting.enabled", true);
+        runTick.cpslimit = getConfig().getDouble("cps-limiting.limit", 20.0);
+        shouldThirdSprintHit = getConfig().getBoolean("third-sprint-hit", false);
+        DELAY = getConfig().getInt("movement-tick-delay", 2);
+        runTick.consistantkb = getConfig().getBoolean("consistent-kb", true);
     }
     
     private void broadcastDelayedPosition(Player subject, Location loc) {
@@ -368,43 +381,10 @@ public class main extends JavaPlugin {
             } catch (Exception e) {}
         }
     }
-
-    public static void read() {
-        try {
-            BufferedReader bfr = new BufferedReader(new FileReader(folderPath + "config.txt"));
-            try {
-                runTick.customhit = Boolean.parseBoolean(bfr.readLine().replace("enabled: ", ""));
-                runTick.intmaxdmtick = Integer.parseInt(bfr.readLine().replace(hitdelaydesc, ""));
-                runTick.damage = Double.parseDouble(bfr.readLine().replace(damagedesc, ""));
-                shouldCheckCPS = Boolean.parseBoolean(bfr.readLine().replace(cpslimitingdesc, ""));
-                runTick.cpslimit = Double.parseDouble(bfr.readLine().replace(cpslimitdesc, ""));
-                shouldThirdSprintHit = Boolean.parseBoolean(bfr.readLine().replace(thirdsprinthitdesc, ""));
-                DELAY = Integer.parseInt(bfr.readLine().replace(delaymovedesc, ""));
-                runTick.consistantkb = Boolean.parseBoolean(bfr.readLine().replace(consistantkbdesc, ""));
-                bfr.close();
-            } catch (IOException e) {}
-        } catch (FileNotFoundException e) {
-            try {
-                Files.createDirectories(Paths.get(folderPath));
-                try {
-                    BufferedWriter bf = new BufferedWriter(new FileWriter(folderPath + "config.txt"));
-                    bf.write("enabled: true"); bf.newLine();
-                    bf.write(hitdelaydesc + "17"); bf.newLine();
-                    bf.write(damagedesc + "0.7"); bf.newLine();
-                    bf.write(cpslimitingdesc + "true"); bf.newLine();
-                    bf.write(cpslimitdesc + "20"); bf.newLine();
-                    bf.write(thirdsprinthitdesc + "false"); bf.newLine();
-                    bf.write(delaymovedesc + "2"); bf.newLine();
-                    bf.write(consistantkbdesc + "true"); bf.newLine();
-                    bf.close();
-                } catch (IOException e1) {}
-            } catch (IOException e1) {}
-        }
-    }
 }
 """,
 
-    # 6. GitHub Actions Build File
+    # 7. GitHub Actions Build File with Manual ProtocolLib Installation
     ".github/workflows/build.yml": """name: Build & Release Plugin
 
 on:
@@ -445,7 +425,7 @@ jobs:
           retention-days: 7
 """,
 
-    # 7. .gitignore
+    # 8. .gitignore
     ".gitignore": """target/
 *.jar
 .idea/
@@ -457,7 +437,7 @@ jobs:
 }
 
 def create_project():
-    print("[*] Generating MineStormRBW with Fixed Delays...")
+    print("[*] Generating MineStormRBW with Standard config.yml...")
     for filepath, content in PROJECT_FILES.items():
         dir_name = os.path.dirname(filepath)
         if dir_name:

@@ -17,12 +17,12 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.util.Vector;
 
 public class runTick implements Listener {
-    public static double cpslimit = 16;
+    public static double cpslimit = 16.0;
     private final Map<UUID, List<Long>> playerClicks = new HashMap<>();
     
-    public static boolean customhit = true, consistantkb;
-    public static int intmaxdmtick;
-    public static double damage, groundy;
+    public static boolean customhit = true, consistantkb = true;
+    public static int intmaxdmtick = 17;
+    public static double damage = 0.7, groundy;
     public static int hitcount;
     
     public static Player victim;
@@ -33,10 +33,12 @@ public class runTick implements Listener {
     public runTick(main m) {
         this.m = m;
     }
+    
     private void recordClick(UUID uuid) {
         playerClicks.putIfAbsent(uuid, new ArrayList<>());
         playerClicks.get(uuid).add(System.currentTimeMillis());
     }
+    
     private int getCPS(UUID uuid) {
         if (!playerClicks.containsKey(uuid)) return 0;
         long now = System.currentTimeMillis();
@@ -44,10 +46,12 @@ public class runTick implements Listener {
         clicks.removeIf(timestamp -> now - timestamp > 1000);
         return clicks.size();
     }
+    
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         playerClicks.remove(event.getPlayer().getUniqueId());
     }
+    
     @EventHandler
     public void interact(PlayerAnimationEvent e) {
         if(e.getAnimationType().equals(PlayerAnimationType.ARM_SWING)) {
@@ -67,11 +71,13 @@ public class runTick implements Listener {
                 return;
             }
             
-            int currentCPS = getCPS(damagerUUID);
-            if (currentCPS > cpslimit) {
-                event.setCancelled(true);
-                playerClicks.remove(damagerUUID);
-                return;
+            if (main.shouldCheckCPS) {
+                int currentCPS = getCPS(damagerUUID);
+                if (currentCPS > cpslimit) {
+                    event.setCancelled(true);
+                    playerClicks.remove(damagerUUID);
+                    return;
+                }
             }
             
             if(customhit) {

@@ -1,8 +1,10 @@
-# Zest Knockback Engine Settings
-knockback:
-  horizontal: 0.385
-  vertical: 0.345
-  sprint-horizontal: 0.440
-  sprint-vertical: 0.125
-  max-vertical-limit: 0.400
-  friction-factor: 0.960
+# MineStormRBW Config
+enabled: true
+hit-delay: 17
+damage-multiplier: 0.7
+cps-limiting:
+  enabled: true
+  limit: 20.0
+third-sprint-hit: false
+movement-tick-delay: 2
+consistent-kb: true
