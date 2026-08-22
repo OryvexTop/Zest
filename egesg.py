@@ -1,7 +1,7 @@
 import os
 
 PROJECT_FILES = {
-    # 1. Maven Configuration
+    # 1. Maven Configuration (Contains Spigot NMS for CraftPlayer/EntityPlayer)
     "pom.xml": """<project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -29,19 +29,17 @@ PROJECT_FILES = {
             <id>codemc-nms</id>
             <url>https://repo.codemc.io/repository/nms/</url>
         </repository>
-        <repository>
-            <id>dmulloy2-repo</id>
-            <url>https://repo.dmulloy2.net/repository/public/</url>
-        </repository>
     </repositories>
 
     <dependencies>
+        <!-- Spigot Server with full NMS (net.minecraft.server) -->
         <dependency>
             <groupId>org.spigotmc</groupId>
             <artifactId>spigot</artifactId>
             <version>1.8.8-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
+        <!-- ProtocolLib (Resolved via manual download in GitHub Actions) -->
         <dependency>
             <groupId>com.comphenix.protocol</groupId>
             <artifactId>ProtocolLib</artifactId>
@@ -92,7 +90,7 @@ commands:
     description: Reloads the MineStormRBW config
 """,
 
-    # 3. ExecuteHit.java
+    # 3. ExecuteHit.java (EXACT code provided)
     "src/main/java/com/minestorm/rbw/MineStormRBW/ExecuteHit.java": """package com.minestorm.rbw.MineStormRBW;
 
 import org.bukkit.command.Command;
@@ -103,26 +101,28 @@ import org.bukkit.entity.Player;
 import net.md_5.bungee.api.ChatColor;
 
 public class ExecuteHit implements CommandExecutor {
+
     @Override
     public boolean onCommand(CommandSender arg0, Command arg1, String arg2, String[] arg3) {
         main.read();
         if(arg0 instanceof Player) {
             Player player = (Player) arg0;
-            player.sendMessage(ChatColor.GREEN + "MineStormRBW Config Reloaded!");
+            player.sendMessage(ChatColor.GREEN + "Reloaded hit!");
         }
         return false;
     }
+
 }
 """,
 
-    # 4. runTick.java (Zest Tap Engine injected into HypixelHits framework)
+    # 4. runTick.java (EXACT code provided with NMS Logic)
     "src/main/java/com/minestorm/rbw/MineStormRBW/runTick.java": """package com.minestorm.rbw.MineStormRBW;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -136,10 +136,7 @@ import org.bukkit.util.Vector;
 
 public class runTick implements Listener {
     public static double cpslimit = 16;
-    private final Map<UUID, List<Long>> playerClicks = new ConcurrentHashMap<>();
-    
-    // ZEST TAP: Track last time damaged to calculate Hit-Selection delays
-    private final Map<UUID, Long> lastHitTaken = new ConcurrentHashMap<>();
+    private final Map<UUID, List<Long>> playerClicks = new HashMap<>();
     
     public static boolean customhit = true, consistantkb;
     public static int intmaxdmtick;
@@ -148,114 +145,88 @@ public class runTick implements Listener {
     
     public static Player victim;
     public static Player damager;
+    public static net.minecraft.server.v1_8_R3.EntityPlayer nmsPlayer;
+    public static net.minecraft.server.v1_8_R3.EntityPlayer nmsdPlayer;
     
+    Map<UUID, Integer> hitCount = new HashMap<>();
+    
+    public static int hitcombo;
     public main m;
     
     public runTick(main m) {
         this.m = m;
     }
-
     private void recordClick(UUID uuid) {
         playerClicks.putIfAbsent(uuid, new ArrayList<>());
         playerClicks.get(uuid).add(System.currentTimeMillis());
     }
-
     private int getCPS(UUID uuid) {
         if (!playerClicks.containsKey(uuid)) return 0;
+        
         long now = System.currentTimeMillis();
         List<Long> clicks = playerClicks.get(uuid);
         clicks.removeIf(timestamp -> now - timestamp > 1000);
+        
         return clicks.size();
     }
-
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         playerClicks.remove(event.getPlayer().getUniqueId());
-        lastHitTaken.remove(event.getPlayer().getUniqueId());
     }
-
     @EventHandler
     public void interact(PlayerAnimationEvent e) {
         if(e.getAnimationType().equals(PlayerAnimationType.ARM_SWING)) {
-            recordClick(e.getPlayer().getUniqueId());
+            UUID uuid = e.getPlayer().getUniqueId();
+            recordClick(uuid);
         }
     }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onHit(EntityDamageByEntityEvent event) {
         if (event.getEntity() instanceof Player && event.getDamager() instanceof Player) {
             victim = (Player) event.getEntity();
             damager = (Player) event.getDamager();
+            nmsPlayer = ((org.bukkit.craftbukkit.v1_8_R3.entity.CraftPlayer) damager).getHandle();
+            nmsdPlayer = ((org.bukkit.craftbukkit.v1_8_R3.entity.CraftPlayer) victim).getHandle();
             UUID damagerUUID = damager.getUniqueId();
             
-            // HypixelHits CPS Limiter
-            if (main.shouldCheckCPS) {
-                int currentCPS = getCPS(damagerUUID);
-                if (currentCPS > cpslimit) {
-                    event.setCancelled(true);
-                    playerClicks.remove(damagerUUID);
-                    return;
-                }
+            int currentCPS = getCPS(damagerUUID);
+            if (currentCPS > cpslimit) {
+                event.setCancelled(true);
+                playerClicks.remove(damagerUUID);
+                return;
             }
             
-            if (customhit) {
-                if (victim.isOnGround()) hitcount = 0;
+            if(customhit) {
+                if(victim.isOnGround()) hitcount = 0;
                 else hitcount++;
-                if (hitcount >= 4) hitcount = 0;
+                if(hitcount >= 4) hitcount = 0;
                 
                 event.setDamage(event.getDamage() * damage);
-                victim.setMaximumNoDamageTicks(intmaxdmtick); // Custom Hit Delay
+                victim.setMaximumNoDamageTicks(intmaxdmtick);
                 
-                if (consistantkb) {
-                    long now = System.currentTimeMillis();
-                    long attackerLastDamage = lastHitTaken.getOrDefault(damagerUUID, 0L);
-                    
-                    // ZEST TAP LOGIC: Attacker got hit recently? Activate counter-burst
-                    boolean isZestCounter = (now - attackerLastDamage) >= 50 && (now - attackerLastDamage) <= 480;
-                    lastHitTaken.put(victim.getUniqueId(), now);
-
-                    // ONE-TICK DELAY: This entirely fixes "NO DELAY / NO KB" bug from the old code
-                    m.getServer().getScheduler().runTask(m, () -> {
-                        if (victim.isOnline() && damager.isOnline()) {
-                            applyZestTapKnockback(victim, damager, isZestCounter);
+                if(consistantkb) {
+                    if(hitcount >= 1 && !victim.isOnGround()) {
+                        if(damager.getLocation().distance(victim.getLocation()) > 2.5) {
+                            if(nmsdPlayer.hurtTicks > 0) {
+                                Vector kb = new Vector(0, 0, 0);
+                                if(hitcount == 1) kb.setY(-0.3);
+                                if(hitcount == 2) kb.setY(-0.7);
+                                victim.setVelocity(kb);
+                            }
                         }
-                    });
+                    }
                 }
             } else {
                 victim.setMaximumNoDamageTicks(20);
+                event.setDamage(event.getDamage());
             }
         }
     }
 
-    private void applyZestTapKnockback(Player victim, Player attacker, boolean isZestCounter) {
-        Vector dir = attacker.getLocation().getDirection().setY(0);
-        if (dir.lengthSquared() < 0.001) {
-            dir = new Vector(0, 0, 1);
-        } else {
-            dir.normalize();
-        }
-
-        // Zest Base Forces
-        double finalH = attacker.isSprinting() ? 0.440 : 0.385;
-        double finalV = attacker.isSprinting() ? 0.470 : 0.345;
-
-        // Hit-Select Counter Burst
-        if (isZestCounter) {
-            finalH = 0.495;  // Extremely sharp horizontal push
-            finalV = 0.310;  // Flatten the vertical to lock them in a combo
-        }
-
-        // Consistent Airborne Clamp (Never fly too high)
-        if (!victim.isOnGround()) {
-            finalV = 0.260; 
-        }
-
-        victim.setVelocity(new Vector(dir.getX() * finalH, finalV, dir.getZ() * finalH));
-    }
 }
 """,
 
-    # 5. main.java
+    # 5. main.java (ProtocolLib Hook & Sprint Logic)
     "src/main/java/com/minestorm/rbw/MineStormRBW/main.java": """package com.minestorm.rbw.MineStormRBW;
 
 import java.io.BufferedReader;
@@ -299,7 +270,7 @@ public class main extends JavaPlugin {
     public static String cpslimitdesc = "CPS limit (hypixel comobing won't work if the player is clicking beyond this value in a second): ";
     public static String thirdsprinthitdesc = "Third Sprint Hit (Enable sprint hit for the third combo hit): ";
     public static String delaymovedesc = "Movement Tick Delay (Delay every player's movement by this value): ";
-    public static String consistantkbdesc = "Consistant KB (Activate Zest Tap Engine): ";
+    public static String consistantkbdesc = "Consistant KB (Combo KB feels more consistant, hit trading might be weird): ";
     
     public static String folderPath = Paths.get("").toAbsolutePath().toString() + File.separator + "plugins" + File.separator + "MineStormRBW" + File.separator;
     
@@ -319,10 +290,10 @@ public class main extends JavaPlugin {
                         runTick.hitcount = 0;
                     }
                     if(!shouldThirdSprintHit) {
-                        if(runTick.victim.getLocation().getY() > runTick.groundy + 0.4) {
-                            runTick.damager.setSprinting(false);
-                        } else {
-                            runTick.damager.setSprinting(true);
+                        if(runTick.victim != null && runTick.damager != null && runTick.nmsPlayer != null && runTick.nmsdPlayer != null) {
+                            if(runTick.victim.getLocation().getY() > runTick.groundy + 0.4) {
+                                runTick.damager.setSprinting(false);
+                            } else runTick.damager.setSprinting(true);
                         }
                     }
                 }
@@ -434,7 +405,7 @@ public class main extends JavaPlugin {
 }
 """,
 
-    # 6. GitHub Actions Build File with Manual ProtocolLib Installation
+    # 6. GitHub Actions Build File with ProtocolLib Local Injection (Fixes Maven Error)
     ".github/workflows/build.yml": """name: Build & Release Plugin
 
 on:
@@ -487,7 +458,7 @@ jobs:
 }
 
 def create_project():
-    print("[*] Generating MineStormRBW with Zest Tap Engine...")
+    print("[*] Generating Exact Original Code (MineStormRBW)...")
     for filepath, content in PROJECT_FILES.items():
         dir_name = os.path.dirname(filepath)
         if dir_name:
