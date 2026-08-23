@@ -1,10 +1,10 @@
 package com.minestorm.rbw.MineStormRBW;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -18,7 +18,8 @@ import org.bukkit.util.Vector;
 
 public class runTick implements Listener {
     public static double cpslimit = 16.0;
-    private final Map<UUID, List<Long>> playerClicks = new HashMap<>();
+    // THREAD SAFE: Prevents crashing when accessing player clicks during packet events
+    private final Map<UUID, List<Long>> playerClicks = new ConcurrentHashMap<>();
     
     public static boolean customhit = true, consistantkb = true;
     public static int intmaxdmtick = 17;
@@ -66,7 +67,7 @@ public class runTick implements Listener {
             damager = (Player) event.getDamager();
             UUID damagerUUID = damager.getUniqueId();
             
-            // 1. FIX: Block spam hits if victim is still in NoDamageTicks window!
+            // Block spam hits if victim is still in NoDamageTicks window!
             if (victim.getNoDamageTicks() > victim.getMaximumNoDamageTicks() / 2.0F) {
                 return;
             }
@@ -87,12 +88,12 @@ public class runTick implements Listener {
                 
                 event.setDamage(event.getDamage() * damage);
                 
-                // 2. FIX: Properly enforce the Hit Delay
+                // Properly enforce the Hit Delay
                 victim.setMaximumNoDamageTicks(intmaxdmtick);
                 victim.setNoDamageTicks(intmaxdmtick);
                 
                 if(consistantkb) {
-                    // 3. FIX: Apply 1-tick delay knockback with proper horizontal math!
+                    // Apply 1-tick delay knockback with proper horizontal math!
                     m.getServer().getScheduler().runTask(m, () -> {
                         if (!victim.isOnline() || !damager.isOnline()) return;
 
@@ -108,7 +109,6 @@ public class runTick implements Listener {
                             }
                         }
                         
-                        // Set true pushback
                         victim.setVelocity(new Vector(direction.getX() * horizontal, vertical, direction.getZ() * horizontal));
                     });
                 }

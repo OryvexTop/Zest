@@ -1,9 +1,9 @@
 package com.minestorm.rbw.MineStormRBW;
 
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -20,7 +20,8 @@ import com.comphenix.protocol.events.PacketEvent;
 public class main extends JavaPlugin {
     public static main instance;
     
-    private final Map<UUID, LinkedList<Location>> historyMap = new HashMap<>();
+    // THREAD SAFE: Used ConcurrentHashMap so Netty async threads won't crash Spigot
+    private final Map<UUID, LinkedList<Location>> historyMap = new ConcurrentHashMap<>();
     public static int DELAY;
     public static boolean shouldCheckCPS, shouldThirdSprintHit;
     
@@ -28,7 +29,6 @@ public class main extends JavaPlugin {
     public void onEnable() {
         instance = this;
         
-        // Setup Native standard config.yml
         saveDefaultConfig();
         loadConfigValues();
         
@@ -99,6 +99,15 @@ public class main extends JavaPlugin {
                 }
             });
         }
+    }
+    
+    @Override
+    public void onDisable() {
+        // FIX: Removes ProtocolLib listeners to prevent "Exception caused by reload" crashes!
+        if (getServer().getPluginManager().getPlugin("ProtocolLib") != null) {
+            ProtocolLibrary.getProtocolManager().removePacketListeners(this);
+        }
+        historyMap.clear();
     }
     
     public void loadConfigValues() {

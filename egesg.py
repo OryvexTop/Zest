@@ -120,14 +120,14 @@ public class ExecuteHit implements CommandExecutor {
 }
 """,
 
-    # 5. runTick.java (FIXED DELAY & FIXED KB BUG)
+    # 5. runTick.java (FIXED DELAY & FIXED KB BUG + THREAD SAFE MAP)
     "src/main/java/com/minestorm/rbw/MineStormRBW/runTick.java": """package com.minestorm.rbw.MineStormRBW;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -141,7 +141,8 @@ import org.bukkit.util.Vector;
 
 public class runTick implements Listener {
     public static double cpslimit = 16.0;
-    private final Map<UUID, List<Long>> playerClicks = new HashMap<>();
+    // THREAD SAFE: Prevents crashing when accessing player clicks during packet events
+    private final Map<UUID, List<Long>> playerClicks = new ConcurrentHashMap<>();
     
     public static boolean customhit = true, consistantkb = true;
     public static int intmaxdmtick = 17;
@@ -189,7 +190,7 @@ public class runTick implements Listener {
             damager = (Player) event.getDamager();
             UUID damagerUUID = damager.getUniqueId();
             
-            // 1. FIX: Block spam hits if victim is still in NoDamageTicks window!
+            // Block spam hits if victim is still in NoDamageTicks window!
             if (victim.getNoDamageTicks() > victim.getMaximumNoDamageTicks() / 2.0F) {
                 return;
             }
@@ -210,12 +211,12 @@ public class runTick implements Listener {
                 
                 event.setDamage(event.getDamage() * damage);
                 
-                // 2. FIX: Properly enforce the Hit Delay
+                // Properly enforce the Hit Delay
                 victim.setMaximumNoDamageTicks(intmaxdmtick);
                 victim.setNoDamageTicks(intmaxdmtick);
                 
                 if(consistantkb) {
-                    // 3. FIX: Apply 1-tick delay knockback with proper horizontal math!
+                    // Apply 1-tick delay knockback with proper horizontal math!
                     m.getServer().getScheduler().runTask(m, () -> {
                         if (!victim.isOnline() || !damager.isOnline()) return;
 
@@ -231,7 +232,6 @@ public class runTick implements Listener {
                             }
                         }
                         
-                        // Set true pushback
                         victim.setVelocity(new Vector(direction.getX() * horizontal, vertical, direction.getZ() * horizontal));
                     });
                 }
@@ -243,13 +243,13 @@ public class runTick implements Listener {
 }
 """,
 
-    # 6. main.java (Native YAML Integration & Spigot API)
+    # 6. main.java (Native YAML Integration & Safely Unhooking ProtocolLib on Reload)
     "src/main/java/com/minestorm/rbw/MineStormRBW/main.java": """package com.minestorm.rbw.MineStormRBW;
 
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -266,7 +266,8 @@ import com.comphenix.protocol.events.PacketEvent;
 public class main extends JavaPlugin {
     public static main instance;
     
-    private final Map<UUID, LinkedList<Location>> historyMap = new HashMap<>();
+    // THREAD SAFE: Used ConcurrentHashMap so Netty async threads won't crash Spigot
+    private final Map<UUID, LinkedList<Location>> historyMap = new ConcurrentHashMap<>();
     public static int DELAY;
     public static boolean shouldCheckCPS, shouldThirdSprintHit;
     
@@ -274,7 +275,6 @@ public class main extends JavaPlugin {
     public void onEnable() {
         instance = this;
         
-        // Setup Native standard config.yml
         saveDefaultConfig();
         loadConfigValues();
         
@@ -345,6 +345,15 @@ public class main extends JavaPlugin {
                 }
             });
         }
+    }
+    
+    @Override
+    public void onDisable() {
+        // FIX: Removes ProtocolLib listeners to prevent "Exception caused by reload" crashes!
+        if (getServer().getPluginManager().getPlugin("ProtocolLib") != null) {
+            ProtocolLibrary.getProtocolManager().removePacketListeners(this);
+        }
+        historyMap.clear();
     }
     
     public void loadConfigValues() {
@@ -437,7 +446,7 @@ jobs:
 }
 
 def create_project():
-    print("[*] Generating MineStormRBW with Standard config.yml...")
+    print("[*] Generating MineStormRBW with Crash Fixes...")
     for filepath, content in PROJECT_FILES.items():
         dir_name = os.path.dirname(filepath)
         if dir_name:
